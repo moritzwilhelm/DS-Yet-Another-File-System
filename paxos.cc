@@ -86,7 +86,7 @@ proposer::setn()
 }
 
 bool
-proposer::run(int instance, std::vector<std::string> newnodes, std::string newv)
+proposer::run(int instance, std::vector<std::string> c_nodes, std::string c_v)
 {
   std::vector<std::string> accepts;
   std::vector<std::string> nodes;
@@ -96,7 +96,7 @@ proposer::run(int instance, std::vector<std::string> newnodes, std::string newv)
 
   pthread_mutex_lock(&pxs_mutex);
   printf("start: initiate paxos for %s w. i=%d v=%s stable=%d\n",
-	 print_members(newnodes).c_str(), instance, newv.c_str(), stable);
+	 print_members(c_nodes).c_str(), instance, c_v.c_str(), stable);
   if (!stable) {  // already running proposer?
     printf("proposer::run: already running\n");
     pthread_mutex_unlock(&pxs_mutex);

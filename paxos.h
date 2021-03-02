@@ -70,8 +70,6 @@ class proposer {
 
   // Proposer state
   bool stable;
-  std::vector<std::string> c_nodes;	// nodes in this instance
-  std::string c_v;	// value we would like to propose
   prop_t my_n;		// number of the last proposal used in this instance
 
   void setn();
