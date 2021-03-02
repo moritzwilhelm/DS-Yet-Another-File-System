@@ -345,9 +345,19 @@ rsm::set_primary()
   }
 
   assert(p.size() > 0);
+  std::vector<unsigned long long> memsi;
   for (unsigned i = 0; i < p.size(); i++) {
-    if (isamember(p[i], c)) {
-      primary = p[i];
+    std::istringstream ist(p[i]);
+    unsigned long long mem;
+    ist >> mem;
+    memsi.push_back(mem);
+  }
+  std::sort(memsi.begin(), memsi.end());
+  for (unsigned i = 0; i < memsi.size(); i++) {
+    std::stringstream sst;
+    sst << memsi[i];
+    if (isamember(sst.str(), c)) {
+      primary = sst.str();
       printf("set_primary: primary is %s\n", primary.c_str());
       return;
     }
