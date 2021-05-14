@@ -24,6 +24,8 @@ int main(int argc, char *argv[]) {
     lock_server ls;
     rpcs server(atoi(argv[1]));
     server.reg(lock_protocol::stat, &ls, &lock_server::stat);
+    server.reg(lock_protocol::acquire, &ls, &lock_server::acquire);
+    server.reg(lock_protocol::release, &ls, &lock_server::release);
 #endif
 
     while (1)
