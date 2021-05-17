@@ -531,9 +531,23 @@ void rpcs::dispatch(djob_t *j) {
     c->decref();
 }
 
+// assumes thread holds mutex m
+auto rpcs::search_reply(unsigned int client_id, unsigned int req_id) {
+    std::list<reply_t> &l = reply_window_.at(client_id);
+    return std::find_if(l.begin(), l.end(), [req_id](reply_t &reply) { return reply.xid == req_id; });
+}
+
 void rpcs::add_reply(unsigned int clt_nonce, unsigned int xid,
                      char *b, int sz) {
     ScopedLock rwl(&reply_window_m_);
+
+    // search for current reply and assert it exists
+    auto it = this->search_reply(clt_nonce, xid);
+    assert(it != reply_window_.at(clt_nonce).end());
+    reply_t &reply = *it;
+    reply.cb_present = true;
+    reply.buf = b;
+    reply.sz = sz;
 }
 
 void rpcs::free_reply_window(void) {
@@ -554,7 +568,30 @@ rpcs::rpcstate_t rpcs::checkduplicate_and_update(unsigned int clt_nonce, unsigne
                                                  unsigned int xid_rep, char **b, int *sz) {
     ScopedLock rwl(&reply_window_m_);
 
-    return NEW;
+    if (xid < xid_rep)
+        return FORGOTTEN;
+
+    std::list<reply_t> &client_window = this->reply_window_.at(clt_nonce);
+    auto cw_start = std::find_if(client_window.begin(), client_window.end(),
+                                 [xid_rep](reply_t &reply) { return reply.xid == xid_rep; });
+
+    // update reply window
+    if (cw_start != client_window.end())
+        client_window.remove_if([xid_rep](reply_t &reply) { return reply.xid < xid_rep; });
+
+    auto it = this->search_reply(clt_nonce, xid);
+    if (it == client_window.end()) {
+        client_window.emplace_back(reply_t(xid));
+        return NEW;
+    } else {
+        reply_t &reply = *it;
+        if (reply.cb_present) {
+            *b = reply.buf;
+            *sz = reply.sz;
+            return DONE;
+        }
+        return INPROGRESS;
+    }
 }
 
 //rpc handler

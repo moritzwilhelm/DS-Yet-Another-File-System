@@ -281,6 +281,8 @@ private:
 
     void free_reply_window(void);
 
+    auto search_reply(unsigned int client_id, unsigned int req_id);
+
     void add_reply(unsigned int clt_nonce, unsigned int xid, char *b, int sz);
 
     rpcstate_t checkduplicate_and_update(unsigned int clt_nonce,
