@@ -46,7 +46,11 @@ public:
 
     bool isdir(inum);
 
+    yfs_client::status create(inum parent, const std::string &name, unsigned long &);
+
     inum lookup(inum di, std::string name);
+
+    std::vector<yfs_client::dirent> readdir(inum dir);
 
     int getfile(inum, fileinfo &);
 

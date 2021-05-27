@@ -16,7 +16,8 @@ public:
         put = 0x6001,
         get,
         getattr,
-        remove
+        remove,
+        get_next_id
     };
     static const unsigned int maxextent = 8192 * 1000;
 

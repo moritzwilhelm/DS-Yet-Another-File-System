@@ -113,8 +113,17 @@ void fuseserver_write(fuse_req_t req, fuse_ino_t ino,
 
 yfs_client::status fuseserver_createhelper(fuse_ino_t parent, const char *name,
                                            mode_t mode, struct fuse_entry_param *e) {
-    // You fill this in
-    return yfs_client::NOENT;
+    if (!yfs->isdir(parent))
+        return yfs_client::NOENT;
+
+    fuse_ino_t new_id;
+    yfs_client::status ret = yfs->create(parent, name, new_id);
+    assert(ret == yfs_client::OK && "File creation failed?");
+
+    e->ino = new_id;
+    getattr(new_id, e->attr);
+
+    return ret;
 }
 
 void fuseserver_create(fuse_req_t req, fuse_ino_t parent, const char *name,
@@ -139,20 +148,19 @@ void fuseserver_mknod(fuse_req_t req, fuse_ino_t parent,
 
 void fuseserver_lookup(fuse_req_t req, fuse_ino_t parent, const char *name) {
     struct fuse_entry_param e;
-    bool found = false;
 
     e.attr_timeout = 0.0;
     e.entry_timeout = 0.0;
 
-    // You fill this in:
-    // Look up the file named `name' in the directory referred to by
-    // `parent' in YFS. If the file was found, initialize e.ino and
-    // e.attr appropriately.
+    fuse_ino_t inum = yfs->lookup(parent, name);
 
-    if (found)
+    if (inum > 0) {
+        e.ino = inum;
+        getattr(inum, e.attr);
         fuse_reply_entry(req, &e);
-    else
+    } else {
         fuse_reply_err(req, ENOENT);
+    }
 }
 
 
@@ -196,9 +204,10 @@ void fuseserver_readdir(fuse_req_t req, fuse_ino_t ino, size_t size,
 
     memset(&b, 0, sizeof(b));
 
-
     // fill in the b data structure using dirbuf_add
-
+    for (const yfs_client::dirent &entry : yfs->readdir(ino)) {
+        dirbuf_add(&b, entry.name.c_str(), entry.inum);
+    }
 
     reply_buf_limited(req, b.p, b.size, off, size);
     free(b.p);

@@ -43,3 +43,7 @@ extent_protocol::status extent_client::remove(extent_protocol::extentid_t eid) {
     ret = cl->call(extent_protocol::remove, eid, r);
     return ret;
 }
+
+extent_protocol::status extent_client::get_next_id(extent_protocol::extentid_t id, unsigned long &res) {
+    return cl->call(extent_protocol::get_next_id, id, res);
+}
