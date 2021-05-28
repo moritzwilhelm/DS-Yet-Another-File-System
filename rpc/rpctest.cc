@@ -18,7 +18,7 @@
 #include "jsl_log.h"
 #include "gettime.h"
 
-#define THRES	10000.0
+#define THRES	150000.0
 #ifdef __APPLE__
 #include<mach/mach.h>
 #endif
