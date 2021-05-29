@@ -16,6 +16,7 @@ public:
         put = 0x6001,
         get,
         getattr,
+        setattr,
         remove,
         get_next_id
     };

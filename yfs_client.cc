@@ -80,6 +80,12 @@ int yfs_client::getdir(inum inum, dirinfo &din) {
     return r;
 }
 
+yfs_client::status yfs_client::setattr(inum id, unsigned long value, char which) {
+    if (this->ec->setattr(id, value, which) != extent_protocol::OK)
+        return NOENT;
+    return OK;
+}
+
 yfs_client::status yfs_client::create(inum parent, const std::string &name, unsigned long &new_id) {
     // check if parent exists
     std::string dir_content;
@@ -142,4 +148,43 @@ std::vector<yfs_client::dirent> yfs_client::readdir(inum dir) {
     }
 
     return res;
+}
+
+yfs_client::status yfs_client::read(inum fi, size_t size, off_t offset, std::string &data) {
+    if (size == 0) {
+        return yfs_client::OK;
+    }
+
+    std::string content;
+    if (this->ec->get(fi, content) != yfs_client::OK) {
+        return yfs_client::NOENT;
+    }
+
+    for (size_t i = 0; i < size; i++) {
+        if (offset + i < content.size()) {
+            data += content.at(offset + i);
+        } else {
+            data += '\0';
+        }
+    }
+
+    return yfs_client::OK;
+}
+
+yfs_client::status yfs_client::write(inum fi, std::string data, off_t offset) {
+    std::string old_content;
+    if (this->ec->get(fi, old_content) != extent_protocol::OK)
+        return yfs_client::NOENT;
+
+    std::string new_content = old_content;
+    // fill potential hole with '\0'
+    if (static_cast<size_t>(offset) > old_content.size()) {
+        new_content.append(offset - old_content.size(), '\0');
+    }
+    // write actual data
+    new_content.replace(offset, data.size(), data);
+
+    this->ec->put(fi, new_content);
+
+    return yfs_client::OK;
 }
