@@ -80,8 +80,14 @@ int yfs_client::getdir(inum inum, dirinfo &din) {
     return r;
 }
 
-yfs_client::status yfs_client::setattr(inum id, unsigned long value, char which) {
-    if (this->ec->setattr(id, value, which) != extent_protocol::OK)
+yfs_client::status yfs_client::setattr(inum id, fileinfo &info) {
+    extent_protocol::attr a;
+    a.size = info.size;
+    a.atime = info.atime;
+    a.mtime = info.mtime;
+    a.ctime = info.ctime;
+
+    if (this->ec->setattr(id, a) != extent_protocol::OK)
         return NOENT;
     return OK;
 }

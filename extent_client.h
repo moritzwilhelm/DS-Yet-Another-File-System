@@ -18,7 +18,7 @@ public:
 
     extent_protocol::status getattr(extent_protocol::extentid_t eid, extent_protocol::attr &a);
 
-    extent_protocol::status setattr(extent_protocol::extentid_t eid, unsigned long, char &);
+    extent_protocol::status setattr(extent_protocol::extentid_t eid, extent_protocol::attr a);
 
     extent_protocol::status put(extent_protocol::extentid_t eid, std::string buf);
 

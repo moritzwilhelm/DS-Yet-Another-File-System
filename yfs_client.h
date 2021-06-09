@@ -56,7 +56,7 @@ public:
 
     int getdir(inum, dirinfo &);
 
-    yfs_client::status setattr(inum id, unsigned long value, char which);
+    yfs_client::status setattr(inum, fileinfo &);
 
     yfs_client::status read(inum, size_t, off_t, std::string &);
 

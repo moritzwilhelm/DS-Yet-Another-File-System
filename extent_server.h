@@ -45,7 +45,7 @@ public:
 
     int getattr(extent_protocol::extentid_t id, extent_protocol::attr &);
 
-    int setattr(extent_protocol::extentid_t id, unsigned long, char &);
+    int setattr(extent_protocol::extentid_t id, extent_protocol::attr, int &);
 
     int remove(extent_protocol::extentid_t id, int &);
 

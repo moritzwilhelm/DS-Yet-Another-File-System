@@ -76,19 +76,29 @@ void fuseserver_getattr(fuse_req_t req, fuse_ino_t ino,
 
 
 void fuseserver_setattr(fuse_req_t req, fuse_ino_t ino, struct stat *attr, int to_set, struct fuse_file_info *fi) {
-    if (FUSE_SET_ATTR_SIZE & to_set) {
-        yfs->setattr(ino, attr->st_size, 0);
-    } else if (FUSE_SET_ATTR_ATIME & to_set) {
-        yfs->setattr(ino, attr->st_atim.tv_sec, 1);
-    } else if (FUSE_SET_ATTR_MTIME & to_set) {
-        yfs->setattr(ino, attr->st_mtim.tv_sec, 2);
-    } else {
-        fuse_reply_err(req, ENOSYS);
+    struct stat st;
+    if (getattr(ino, st) != yfs_client::OK) {
+        fuse_reply_err(req, ENOENT);
         return;
     }
 
-    struct stat st;
-    if (getattr(ino, st) != yfs_client::OK) {
+    if (FUSE_SET_ATTR_SIZE & to_set) {
+        st.st_size = attr->st_size;
+    }
+    if (FUSE_SET_ATTR_ATIME & to_set) {
+        st.st_atime = attr->st_atime;
+    }
+    if (FUSE_SET_ATTR_MTIME & to_set) {
+        st.st_mtime = attr->st_mtime;
+    }
+
+    yfs_client::fileinfo info;
+    info.size = st.st_size;
+    info.atime = st.st_atime;
+    info.mtime = st.st_mtime;
+    info.ctime = st.st_ctime;
+
+    if (yfs->setattr(ino, info) != yfs_client::OK) {
         fuse_reply_err(req, ENOENT);
         return;
     }

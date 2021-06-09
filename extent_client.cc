@@ -30,8 +30,9 @@ extent_protocol::status extent_client::getattr(extent_protocol::extentid_t eid, 
     return ret;
 }
 
-extent_protocol::status extent_client::setattr(extent_protocol::extentid_t eid, unsigned long value, char &which) {
-    return cl->call(extent_protocol::setattr, eid, value, which);
+extent_protocol::status extent_client::setattr(extent_protocol::extentid_t eid, extent_protocol::attr attr) {
+    int r;
+    return cl->call(extent_protocol::setattr, eid, attr, r);
 }
 
 extent_protocol::status extent_client::put(extent_protocol::extentid_t eid, std::string buf) {

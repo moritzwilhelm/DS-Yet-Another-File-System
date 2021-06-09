@@ -57,29 +57,19 @@ int extent_server::getattr(extent_protocol::extentid_t id, extent_protocol::attr
     return extent_protocol::NOENT;
 }
 
-int extent_server::setattr(extent_protocol::extentid_t id, unsigned long value, char &which) {
+int extent_server::setattr(extent_protocol::extentid_t id, extent_protocol::attr a, int &) {
     ScopedLock scoped_sl(&this->storage_lock);
 
-    if (this->storage.find(id) == this->storage.end()) {
-        return extent_protocol::NOENT;
+    if (this->storage.find(id) != this->storage.end()) {
+        this->storage.at(id).content.resize(a.size);
+        extent_protocol::attr &data = this->storage.at(id).metadata;
+        data.size = a.size;
+        data.atime = a.atime;
+        data.mtime = a.mtime;
+        data.ctime = a.ctime;
+        return extent_protocol::OK;
     }
-    extent_protocol::attr &data = this->storage.at(id).metadata;
-
-    switch (which) {
-        case 0:
-            data.size = value;
-            this->storage.at(id).content.resize(data.size, '\0');
-            break;
-        case 1:
-            data.atime = value;
-            break;
-        case 2:
-            data.mtime = value;
-            break;
-        default:
-            assert(false && "Setattr wanted to change a attribute outside the normal range?");
-    }
-    return extent_protocol::OK;
+    return extent_protocol::NOENT;
 }
 
 int extent_server::remove(extent_protocol::extentid_t id, int &) {
