@@ -119,8 +119,8 @@ void fuseserver_read(fuse_req_t req, fuse_ino_t ino, size_t size, off_t off, str
 
 void fuseserver_write(fuse_req_t req, fuse_ino_t ino, const char *buf,
                       size_t size, off_t off, struct fuse_file_info *fi) {
-    if (yfs->isfile(ino) && strlen(buf) >= size && off >= 0) {
-        if (yfs->write(ino, std::string(buf).substr(0, size), off) == yfs_client::OK) {
+    if (yfs->isfile(ino) && off >= 0) {
+        if (yfs->write(ino, std::string(buf, size), off) == yfs_client::OK) {
             fuse_reply_write(req, size);
             return;
         }

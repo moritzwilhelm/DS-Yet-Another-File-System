@@ -166,12 +166,12 @@ yfs_client::status yfs_client::read(inum fi, size_t size, off_t offset, std::str
         return yfs_client::NOENT;
     }
 
-    for (size_t i = 0; i < size; i++) {
-        if (offset + i < content.size()) {
-            data += content.at(offset + i);
-        } else {
-            data += '\0';
-        }
+    if (static_cast<size_t>(offset) < content.size()) {
+        data = content.substr(offset, size);
+    }
+
+    if (data.size() < size) {
+        data.resize(size);
     }
 
     return yfs_client::OK;
@@ -185,7 +185,7 @@ yfs_client::status yfs_client::write(inum fi, std::string data, off_t offset) {
     std::string new_content = old_content;
     // fill potential hole with '\0'
     if (static_cast<size_t>(offset) > old_content.size()) {
-        new_content.append(offset - old_content.size(), '\0');
+        new_content.resize(offset);
     }
     // write actual data
     new_content.replace(offset, data.size(), data);
