@@ -16,14 +16,15 @@ int extent_server::put(extent_protocol::extentid_t id, std::string buf, int &) {
     Extent extent;
     if (this->storage.find(id) != this->storage.end()) {
         extent = this->storage.at(id);
-        if (extent.content != buf) {
-            unsigned int current_time = std::time(nullptr);
-            extent.metadata.mtime = current_time;
-            extent.metadata.ctime = current_time;
-        }
+
+        // update metadata
+        time_t current_time = std::time(nullptr);
+        extent.metadata.mtime = current_time;
+        extent.metadata.ctime = current_time;
+
     }
     extent.content = buf;
-    extent.metadata.size = buf.size() - std::count(buf.begin(), buf.end(), '\0');
+    extent.metadata.size = buf.size();
     this->storage[id] = extent;
     return extent_protocol::OK;
 }

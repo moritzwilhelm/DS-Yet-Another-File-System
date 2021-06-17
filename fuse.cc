@@ -16,6 +16,7 @@
 #include <unistd.h>
 #include <assert.h>
 #include <arpa/inet.h>
+#include <ctime>
 #include "yfs_client.h"
 
 int myid;
@@ -83,6 +84,10 @@ void fuseserver_setattr(fuse_req_t req, fuse_ino_t ino, struct stat *attr, int t
 
     if (FUSE_SET_ATTR_SIZE & to_set) {
         st.st_size = attr->st_size;
+        // update mtime and ctime
+        time_t current_time = std::time(nullptr);
+        st.st_mtime = current_time;
+        st.st_ctime = current_time;
     }
     if (FUSE_SET_ATTR_ATIME & to_set) {
         st.st_atime = attr->st_atime;
