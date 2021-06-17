@@ -238,21 +238,26 @@ void fuseserver_open(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi) 
 
 
 void fuseserver_mkdir(fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode) {
-#if 0
     struct fuse_entry_param e;
-    // You fill this in
+    if (!yfs->isdir(parent))
+        fuse_reply_err(req, ENOSYS);
+
+    fuse_ino_t new_id;
+    yfs_client::status ret = yfs->mkdir(parent, name, new_id);
+    assert(ret == yfs_client::OK && "Directory creation failed?");
+
+    e.ino = new_id;
+    getattr(new_id, e.attr);
+
     fuse_reply_entry(req, &e);
-#else
-    fuse_reply_err(req, ENOSYS);
-#endif
 }
 
 void fuseserver_unlink(fuse_req_t req, fuse_ino_t parent, const char *name) {
-
-    // You fill this in
-    // Success:	fuse_reply_err(req, 0);
-    // Not found:	fuse_reply_err(req, ENOENT);
-    fuse_reply_err(req, ENOSYS);
+    if (yfs->unlink(parent, name) == yfs_client::OK) {
+        fuse_reply_err(req, 0);
+    } else {
+        fuse_reply_err(req, ENOENT);
+    }
 }
 
 void fuseserver_statfs(fuse_req_t req) {

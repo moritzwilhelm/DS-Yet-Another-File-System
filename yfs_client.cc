@@ -14,7 +14,12 @@
 
 yfs_client::yfs_client(std::string extent_dst, std::string lock_dst) {
     ec = new extent_client(extent_dst);
+    lc = new lock_client(lock_dst);
+}
 
+yfs_client::~yfs_client() {
+    delete ec;
+    delete lc;
 }
 
 yfs_client::inum yfs_client::n2i(std::string n) {
@@ -41,14 +46,12 @@ bool yfs_client::isdir(inum inum) {
 }
 
 int yfs_client::getfile(inum inum, fileinfo &fin) {
-    int r = OK;
-
+    ScopedExtentLock scopedExtentLock(inum, lc);
 
     printf("getfile %016llx\n", inum);
     extent_protocol::attr a;
     if (ec->getattr(inum, a) != extent_protocol::OK) {
-        r = IOERR;
-        goto release;
+        return IOERR;
     }
 
     fin.atime = a.atime;
@@ -57,49 +60,51 @@ int yfs_client::getfile(inum inum, fileinfo &fin) {
     fin.size = a.size;
     printf("getfile %016llx -> sz %llu\n", inum, fin.size);
 
-    release:
-
-    return r;
+    return OK;
 }
 
 int yfs_client::getdir(inum inum, dirinfo &din) {
-    int r = OK;
-
+    ScopedExtentLock scopedExtentLock(inum, lc);
 
     printf("getdir %016llx\n", inum);
     extent_protocol::attr a;
     if (ec->getattr(inum, a) != extent_protocol::OK) {
-        r = IOERR;
-        goto release;
+        return IOERR;
     }
     din.atime = a.atime;
     din.mtime = a.mtime;
     din.ctime = a.ctime;
 
-    release:
-    return r;
+    return OK;
 }
 
 yfs_client::status yfs_client::setattr(inum id, fileinfo &info) {
+    ScopedExtentLock scopedExtentLock(id, lc);
+
     extent_protocol::attr a;
     a.size = info.size;
     a.atime = info.atime;
     a.mtime = info.mtime;
     a.ctime = info.ctime;
 
-    if (this->ec->setattr(id, a) != extent_protocol::OK)
+    if (this->ec->setattr(id, a) != extent_protocol::OK) {
         return NOENT;
+    }
+
     return OK;
 }
 
 yfs_client::status yfs_client::create(inum parent, const std::string &name, unsigned long &new_id) {
+    ScopedExtentLock scopedExtentLock(parent, lc);
+
     // check if parent exists
     std::string dir_content;
-    if (this->ec->get(parent, dir_content) != extent_protocol::OK)
-        return yfs_client::NOENT;
+    if (this->ec->get(parent, dir_content) != extent_protocol::OK) {
+        return NOENT;
+    }
 
     // create new empty file
-    new_id = lookup(parent, name);
+    new_id = find_inum(parent, name);
     if (new_id == 0) {
         this->ec->get_next_id(0, new_id);
         // set file bit
@@ -111,16 +116,81 @@ yfs_client::status yfs_client::create(inum parent, const std::string &name, unsi
         this->ec->put(parent, dir_content);
     }
 
-    return yfs_client::OK;
+    return OK;
 }
 
-yfs_client::inum yfs_client::lookup(inum di, std::string name) {
-    if (!isdir(di))
+yfs_client::status yfs_client::mkdir(inum parent, const std::string &name, unsigned long &new_id) {
+    ScopedExtentLock scopedExtentLock(parent, lc);
+
+    // check if parent exists
+    std::string dir_content;
+    if (this->ec->get(parent, dir_content) != extent_protocol::OK) {
+        return NOENT;
+    }
+
+    // create new empty directory
+    new_id = find_inum(parent, name);
+    if (!new_id) {
+        this->ec->get_next_id(0, new_id);
+        // set least significant bit to zero for directory
+        new_id &= ~0x80000000;
+        this->ec->put(new_id, "");
+
+        // add directory to parent directory
+        dir_content += name + ',' + std::to_string(new_id) + ';';
+        this->ec->put(parent, dir_content);
+    }
+
+    return OK;
+}
+
+yfs_client::status yfs_client::unlink(inum parent, std::string name) {
+    ScopedExtentLock scopedDirLock(parent, lc);
+
+    inum id = this->find_inum(parent, name);
+    if (!id || !isfile(id)) {
+        return NOENT;
+    }
+
+    ScopedExtentLock scopedFileLock(id, lc);
+
+    // remove file from storage
+    if (this->ec->remove(id) != extent_protocol::OK) {
+        return NOENT;
+    }
+
+    // remove file from parent directory
+    std::string dir_content{};
+    if (this->ec->get(parent, dir_content) != extent_protocol::OK) {
+        return NOENT;
+    }
+
+    std::string new_content;
+    char *token = std::strtok(const_cast<char *>(dir_content.c_str()), ";");
+    while (token) {
+        std::string entry = std::string(token);
+        size_t delimiter = entry.find(',');
+        if (name != entry.substr(0, delimiter)) {
+            new_content += entry + ';';
+        }
+        token = std::strtok(nullptr, ";");
+    }
+
+    this->ec->put(parent, new_content);
+
+    return OK;
+}
+
+// precondition: caller holds lock of di
+yfs_client::inum yfs_client::find_inum(inum di, const std::string &name) {
+    if (!isdir(di)) {
         return 0;
+    }
 
     std::string dir_content;
-    if (this->ec->get(di, dir_content) != extent_protocol::OK)
+    if (this->ec->get(di, dir_content) != extent_protocol::OK) {
         return 0;
+    }
 
     char *token = std::strtok(const_cast<char *>(dir_content.c_str()), ";");
     while (token) {
@@ -131,10 +201,19 @@ yfs_client::inum yfs_client::lookup(inum di, std::string name) {
         }
         token = std::strtok(nullptr, ";");
     }
+
     return 0;
 }
 
+yfs_client::inum yfs_client::lookup(inum di, std::string name) {
+    ScopedExtentLock scopedExtentLock(di, lc);
+    inum r = find_inum(di, name);
+    return r;
+}
+
 std::vector<yfs_client::dirent> yfs_client::readdir(inum dir) {
+    ScopedExtentLock scopedExtentLock(dir, lc);
+
     std::vector<dirent> res;
 
     std::string content;
@@ -157,6 +236,8 @@ std::vector<yfs_client::dirent> yfs_client::readdir(inum dir) {
 }
 
 yfs_client::status yfs_client::read(inum fi, size_t size, off_t offset, std::string &data) {
+    ScopedExtentLock scopedExtentLock(fi, lc);
+
     if (size == 0) {
         return yfs_client::OK;
     }
@@ -178,9 +259,12 @@ yfs_client::status yfs_client::read(inum fi, size_t size, off_t offset, std::str
 }
 
 yfs_client::status yfs_client::write(inum fi, std::string data, off_t offset) {
+    ScopedExtentLock scopedExtentLock(fi, lc);
+
     std::string old_content;
-    if (this->ec->get(fi, old_content) != extent_protocol::OK)
-        return yfs_client::NOENT;
+    if (this->ec->get(fi, old_content) != extent_protocol::OK) {
+        return NOENT;
+    }
 
     std::string new_content = old_content;
     // fill potential hole with '\0'
@@ -192,5 +276,5 @@ yfs_client::status yfs_client::write(inum fi, std::string data, off_t offset) {
 
     this->ec->put(fi, new_content);
 
-    return yfs_client::OK;
+    return OK;
 }

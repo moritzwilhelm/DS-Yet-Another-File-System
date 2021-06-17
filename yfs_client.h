@@ -4,11 +4,31 @@
 #include <string>
 //#include "yfs_protocol.h"
 #include "extent_client.h"
+#include "lock_client.h"
 #include <vector>
 
 
 class yfs_client {
     extent_client *ec;
+    lock_client *lc;
+
+    class ScopedExtentLock {
+        lock_protocol::lockid_t id;
+        lock_client *lc;
+
+    public:
+        ScopedExtentLock(lock_protocol::lockid_t id, lock_client *lc) {
+            this->lc = lc;
+            this->id = id;
+
+            this->lc->acquire(this->id);
+        }
+
+        ~ScopedExtentLock() {
+            this->lc->release(this->id);
+        }
+    };
+
 public:
 
     typedef unsigned long long inum;
@@ -42,11 +62,19 @@ public:
 
     yfs_client(std::string, std::string);
 
+    ~yfs_client();
+
     bool isfile(inum);
 
     bool isdir(inum);
 
     yfs_client::status create(inum parent, const std::string &name, unsigned long &);
+
+    yfs_client::status mkdir(inum parent, const std::string &name, unsigned long &);
+
+    yfs_client::status unlink(inum, std::string);
+
+    inum find_inum(inum di, const std::string& name);
 
     inum lookup(inum di, std::string name);
 
