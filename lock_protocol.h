@@ -21,12 +21,15 @@ public:
 };
 
 class rlock_protocol {
- public:
-  enum xxstatus { OK, RPCERR };
-  typedef int status;
-  enum rpc_numbers {
-    revoke = 0x8001,
-    retry = 0x8002
-  };
+public:
+    enum xxstatus {
+        OK, RPCERR
+    };
+    typedef int status;
+    enum rpc_numbers {
+        revoke = 0x8001,
+        retry = 0x8002
+    };
 };
-#endif 
+
+#endif
