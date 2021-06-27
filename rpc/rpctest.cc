@@ -18,7 +18,7 @@
 #include "jsl_log.h"
 #include "gettime.h"
 
-#define THRES	10000.0
+#define THRES	150000.0
 #ifdef __APPLE__
 #include<mach/mach.h>
 #endif
@@ -250,7 +250,7 @@ client4(void *xx)
 	initial = rss;
 
     printf(" RAM used: %iMB (initial)", int(rss) / 1024);
-	
+
 	int which_cl = ((unsigned long) xx ) % NUM_CL;
 	for(int j = 0; j < 5; j++){
         int interval = 100;
@@ -348,7 +348,7 @@ simple_tests(rpcc *c)
 	printf("simple_tests OK\n");
 }
 
-void 
+void
 concurrent_test(int nt)
 {
 	// create threads that make lots of calls in parallel,
@@ -370,7 +370,7 @@ concurrent_test(int nt)
 	printf(" OK\n");
 }
 
-void 
+void
 garbage_collection_test(int nt)
 {
     // test garbage collection
@@ -390,7 +390,7 @@ garbage_collection_test(int nt)
 }
 
 
-void 
+void
 lossy_test()
 {
 	int ret;
@@ -422,7 +422,7 @@ lossy_test()
 	assert(setenv("RPC_LOSSY", "0", 1) == 0);
 }
 
-void 
+void
 failure_test()
 {
 	rpcc *client1;

@@ -4,46 +4,91 @@
 #include <string>
 //#include "yfs_protocol.h"
 #include "extent_client.h"
+#include "lock_client.h"
 #include <vector>
 
 
-  class yfs_client {
-  extent_client *ec;
- public:
+class yfs_client {
+    extent_client *ec;
+    lock_client *lc;
 
-  typedef unsigned long long inum;
-  enum xxstatus { OK, RPCERR, NOENT, IOERR, FBIG };
-  typedef int status;
+    class ScopedExtentLock {
+        lock_protocol::lockid_t id;
+        lock_client *lc;
 
-  struct fileinfo {
-    unsigned long long size;
-    unsigned long atime;
-    unsigned long mtime;
-    unsigned long ctime;
-  };
-  struct dirinfo {
-    unsigned long atime;
-    unsigned long mtime;
-    unsigned long ctime;
-  };
-  struct dirent {
-    std::string name;
-    unsigned long long inum;
-  };
+    public:
+        ScopedExtentLock(lock_protocol::lockid_t id, lock_client *lc) {
+            this->lc = lc;
+            this->id = id;
 
- private:
-  static std::string filename(inum);
-  static inum n2i(std::string);
- public:
+            this->lc->acquire(this->id);
+        }
 
-  yfs_client(std::string, std::string);
+        ~ScopedExtentLock() {
+            this->lc->release(this->id);
+        }
+    };
 
-  bool isfile(inum);
-  bool isdir(inum);
-  inum ilookup(inum di, std::string name);
+public:
 
-  int getfile(inum, fileinfo &);
-  int getdir(inum, dirinfo &);
+    typedef unsigned long long inum;
+    enum xxstatus {
+        OK, RPCERR, NOENT, IOERR, FBIG
+    };
+    typedef int status;
+
+    struct fileinfo {
+        unsigned long long size;
+        unsigned long atime;
+        unsigned long mtime;
+        unsigned long ctime;
+    };
+    struct dirinfo {
+        unsigned long atime;
+        unsigned long mtime;
+        unsigned long ctime;
+    };
+    struct dirent {
+        std::string name;
+        unsigned long long inum;
+    };
+
+private:
+    static std::string filename(inum);
+
+    static inum n2i(std::string);
+
+public:
+
+    yfs_client(std::string, std::string);
+
+    ~yfs_client();
+
+    bool isfile(inum);
+
+    bool isdir(inum);
+
+    yfs_client::status create(inum parent, const std::string &name, unsigned long &);
+
+    yfs_client::status mkdir(inum parent, const std::string &name, unsigned long &);
+
+    yfs_client::status unlink(inum, std::string);
+
+    inum find_inum(inum di, const std::string& name);
+
+    inum lookup(inum di, std::string name);
+
+    std::vector<yfs_client::dirent> readdir(inum dir);
+
+    int getfile(inum, fileinfo &);
+
+    int getdir(inum, dirinfo &);
+
+    yfs_client::status setattr(inum, fileinfo &);
+
+    yfs_client::status read(inum, size_t, off_t, std::string &);
+
+    yfs_client::status write(inum, std::string, off_t);
 };
 
 #endif 
