@@ -4,20 +4,20 @@
 #include <string>
 //#include "yfs_protocol.h"
 #include "extent_client.h"
-#include "lock_client.h"
+#include "lock_client_cache.h"
 #include <vector>
 
 
 class yfs_client {
     extent_client *ec;
-    lock_client *lc;
+    lock_client_cache *lc;
 
     class ScopedExtentLock {
         lock_protocol::lockid_t id;
-        lock_client *lc;
+        lock_client_cache *lc;
 
     public:
-        ScopedExtentLock(lock_protocol::lockid_t id, lock_client *lc) {
+        ScopedExtentLock(lock_protocol::lockid_t id, lock_client_cache *lc) {
             this->lc = lc;
             this->id = id;
 
@@ -74,7 +74,7 @@ public:
 
     yfs_client::status unlink(inum, std::string);
 
-    inum find_inum(inum di, const std::string& name);
+    inum find_inum(inum di, const std::string &name);
 
     inum lookup(inum di, std::string name);
 

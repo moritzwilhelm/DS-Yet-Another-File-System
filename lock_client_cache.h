@@ -8,6 +8,9 @@
 #include "lock_protocol.h"
 #include "rpc.h"
 #include "lock_client.h"
+#include <unordered_map>
+#include "pthread.h"
+#include <unordered_set>
 
 // Classes that inherit lock_release_user can override dorelease so that 
 // that they will be called when lock_client releases a lock.
@@ -78,18 +81,77 @@ private:
     std::string hostname;
     std::string id;
 
+    pthread_mutex_t seq_num_m;
+    unsigned int seq_num = 0;
+
+    struct Lock {
+        enum status {
+            NONE = 0,
+            FREE = 1,
+            LOCKED = 2,
+            ACQUIRING = 3,
+            RELEASING = 4
+        };
+
+
+        Lock() {
+            assert(pthread_mutex_init(&mutex, nullptr) == 0);
+            assert(pthread_cond_init(&retry_called, nullptr) == 0);
+            assert(pthread_cond_init(&acquire_returned, nullptr) == 0);
+            assert(pthread_cond_init(&local_release_called, nullptr) == 0);
+            assert(pthread_cond_init(&server_release_called, nullptr) == 0);
+            assert(pthread_cond_init(&release_ready_perfectly, nullptr) == 0);
+        }
+
+        ~Lock() {
+            assert(pthread_mutex_destroy(&mutex) == 0);
+            assert(pthread_cond_destroy(&retry_called) == 0);
+            assert(pthread_cond_destroy(&acquire_returned) == 0);
+            assert(pthread_cond_destroy(&local_release_called) == 0);
+            assert(pthread_cond_destroy(&server_release_called) == 0);
+            assert(pthread_cond_destroy(&release_ready_perfectly) == 0);
+        }
+
+        pthread_mutex_t mutex;
+        pthread_cond_t retry_called;
+        pthread_cond_t acquire_returned;
+        pthread_cond_t local_release_called;
+        pthread_cond_t server_release_called;
+        pthread_cond_t release_ready_perfectly;
+
+        status stat = NONE;
+        bool taken = false;
+    };
+
+    pthread_mutex_t locks_m;
+    std::unordered_map<lock_protocol::lockid_t, Lock> locks;
+
+    pthread_mutex_t release_reqs_m;
+    pthread_cond_t revoke_called;
+    std::unordered_set<lock_protocol::lockid_t> release_requests;
+
 public:
     static int last_port;
 
     lock_client_cache(std::string xdst, class lock_release_user *l = 0);
 
-    virtual ~lock_client_cache() {};
+    ~lock_client_cache();
 
-    lock_protocol::status acquire(lock_protocol::lockid_t);
+    lock_client_cache::Lock &get_lock(lock_protocol::lockid_t);
 
-    virtual lock_protocol::status release(lock_protocol::lockid_t);
+    unsigned int get_next_seq_num();
+
+    lock_protocol::status stat(lock_protocol::lockid_t) override;
+
+    lock_protocol::status acquire(lock_protocol::lockid_t) override;
+
+    lock_protocol::status release(lock_protocol::lockid_t) override;
 
     void releaser();
+
+    rlock_protocol::status retry(lock_protocol::lockid_t, int &);
+
+    rlock_protocol::status revoke(lock_protocol::lockid_t, int &);
 };
 
 #endif
