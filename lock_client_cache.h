@@ -121,6 +121,7 @@ private:
 
         status stat = NONE;
         bool taken = false;
+        unsigned int acquire_seq_num = 0;
     };
 
     pthread_mutex_t locks_m;

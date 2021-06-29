@@ -56,12 +56,13 @@ lock_client_cache::~lock_client_cache() {
     assert(pthread_mutex_destroy(&this->release_reqs_m) == 0);
     assert(pthread_cond_destroy(&this->revoke_called) == 0);
 
+    // release cached non-revoked locks manually
     int r;
-    for (auto &entry : locks) {
+    for (auto &entry : this->locks) {
         Lock &lock = entry.second;
         assert(lock.stat == Lock::NONE || lock.stat == Lock::FREE);
         if (lock.stat == Lock::FREE) {
-            assert(cl->call(lock_protocol::release, this->id, get_next_seq_num(), entry.first, r) == lock_protocol::OK);
+            assert(cl->call(lock_protocol::release, this->id, lock.acquire_seq_num, entry.first, r) == lock_protocol::OK);
         }
     }
 }
@@ -90,10 +91,8 @@ void lock_client_cache::releaser() {
             }
 
             int r;
-            //unlock(lock.mutex);
             //printf("RELEASER SENDS %llu %s\n", lid, this->id.c_str());
-            assert(cl->call(lock_protocol::release, this->id, get_next_seq_num(), lid, r) == lock_protocol::OK);
-            //lock(lock.mutex);
+            assert(cl->call(lock_protocol::release, this->id, lock.acquire_seq_num, lid, r) == lock_protocol::OK);
             assert(lock.stat == Lock::RELEASING);
             lock.stat = Lock::NONE;
             broadcast(lock.server_release_called);
@@ -123,10 +122,9 @@ lock_protocol::status lock_client_cache::acquire(lock_protocol::lockid_t lid) {
     switch (lock.stat) {
         case Lock::NONE:
             lock.stat = Lock::ACQUIRING;
-            //unlock(lock.mutex);
+            lock.acquire_seq_num = get_next_seq_num();
             int r;
-            ret = cl->call(lock_protocol::acquire, this->id, get_next_seq_num(), lid, r);
-            //lock(lock.mutex);
+            ret = cl->call(lock_protocol::acquire, this->id, lock.acquire_seq_num, lid, r);
             broadcast(lock.acquire_returned);
             if (ret == lock_protocol::OK) {
                 lock.stat = Lock::LOCKED;
