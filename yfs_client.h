@@ -21,11 +21,11 @@ class yfs_client {
             this->lc = lc;
             this->id = id;
 
-            this->lc->acquire(this->id);
+            assert(this->lc->acquire(this->id) == lock_protocol::OK);
         }
 
         ~ScopedExtentLock() {
-            this->lc->release(this->id);
+            assert(this->lc->release(this->id) == lock_protocol::OK);
         }
     };
 

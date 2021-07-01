@@ -68,12 +68,16 @@ extent_protocol::status extent_client::get(extent_protocol::extentid_t eid, std:
             return extent_protocol::NOENT;
         }
         this->storage.emplace(eid, extent);
+
+        buf = extent.content;
     }
     return ret;
 }
 
 extent_protocol::status extent_client::getattr(extent_protocol::extentid_t eid, extent_protocol::attr &attr) {
+    puts("GETTING GETATTR LOCK");
     ScopedLock scopedLock(&this->storage_lock);
+    puts("GOT GETATTR LOCK");
     extent_protocol::status ret = extent_protocol::OK;
 
     if (this->storage.find(eid) == this->storage.end() || !this->storage.at(eid).present) {
@@ -91,6 +95,7 @@ extent_protocol::status extent_client::getattr(extent_protocol::extentid_t eid, 
 
     const extent_protocol::attr &data = this->storage.at(eid).metadata;
     attr = data;
+    puts("END OF GETATTR");
     return ret;
 }
 
@@ -110,9 +115,6 @@ extent_protocol::status extent_client::setattr(extent_protocol::extentid_t eid, 
 extent_protocol::status extent_client::remove(extent_protocol::extentid_t eid) {
     ScopedLock scopedLock(&this->storage_lock);
 
-    //TODO: on synchronization, only sync remove if extent was not new
-    //TODO: on synchronization, remove from storage if not present
-
     if (this->storage.find(eid) != this->storage.end() && this->storage.at(eid).present) {
         Extent &extent = this->storage.at(eid);
         extent.present = false;
@@ -122,4 +124,35 @@ extent_protocol::status extent_client::remove(extent_protocol::extentid_t eid) {
 
 extent_protocol::status extent_client::get_next_id(extent_protocol::extentid_t id, unsigned long &res) {
     return cl->call(extent_protocol::get_next_id, id, res);
+}
+
+extent_protocol::status extent_client::flush(extent_protocol::extentid_t eid) {
+    puts("FLUSH CALLED");
+    ScopedLock scopedLock(&this->storage_lock);
+    extent_protocol::status ret = extent_protocol::OK;
+    // return immediately if eid not present in cache for some reason
+    if (this->storage.find(eid) == this->storage.end()) {
+        return ret;
+    }
+    Extent &extent = this->storage.at(eid);
+
+    int r;
+
+    if (!extent.present && !extent.is_new) {
+        // deleted existing extent
+        ret |= this->cl->call(extent_protocol::remove, eid, r);
+        goto end;
+    }
+    //if (extent.present && extent.dirty) {
+    if (extent.dirty) {
+        // modified extent
+        printf("Putting eid %llu to server\n", eid);
+        ret |= this->cl->call(extent_protocol::put, eid, extent.content, r);
+        ret |= this->cl->call(extent_protocol::setattr, eid, extent.metadata, r);
+    }
+
+    end:
+    this->storage.erase(eid);
+    puts("FLUSH TERMINATING");
+    return ret;
 }

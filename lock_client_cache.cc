@@ -56,6 +56,8 @@ lock_client_cache::~lock_client_cache() {
     assert(pthread_mutex_destroy(&this->release_reqs_m) == 0);
     assert(pthread_cond_destroy(&this->revoke_called) == 0);
 
+    delete lu;
+
     // release cached non-revoked locks manually
     int r;
     for (auto &entry : this->locks) {
@@ -83,7 +85,7 @@ void lock_client_cache::releaser() {
         for (lock_protocol::lockid_t lid : this->release_requests) {
             //printf("RELEASER CLIENT\n");
             //lock_protocol::lockid_t lid = this->release_requests.front();
-            unlock(this->release_reqs_m);
+            //unlock(this->release_reqs_m);
             Lock &lock = this->get_lock(lid);
             lock(lock.mutex);
             while (lock.taken) {
@@ -91,13 +93,17 @@ void lock_client_cache::releaser() {
             }
 
             int r;
-            //printf("RELEASER SENDS %llu %s\n", lid, this->id.c_str());
+            printf("RELEASER SENDS %llu %s\n", lid, this->id.c_str());
+            // make sure the extent cache is flushed
+            lu->dorelease(lid);
+
             assert(cl->call(lock_protocol::release, this->id, lock.acquire_seq_num, lid, r) == lock_protocol::OK);
+            printf("RELEASER HAS SEND %llu %s\n", lid, this->id.c_str());
             assert(lock.stat == Lock::RELEASING);
             lock.stat = Lock::NONE;
             broadcast(lock.server_release_called);
             unlock(lock.mutex);
-            lock(this->release_reqs_m);
+            //lock(this->release_reqs_m);
         }
         this->release_requests.clear();
         wait(revoke_called, this->release_reqs_m);
@@ -151,7 +157,6 @@ lock_protocol::status lock_client_cache::acquire(lock_protocol::lockid_t lid) {
             unlock(lock.mutex);
             return acquire(lid);
         case Lock::RELEASING:
-            // same as LOCKED?
             wait(lock.server_release_called, lock.mutex);
             unlock(lock.mutex);
             return acquire(lid);

@@ -49,6 +49,8 @@ public:
     extent_protocol::status remove(extent_protocol::extentid_t eid);
 
     extent_protocol::status get_next_id(extent_protocol::extentid_t id, unsigned long &);
+
+    extent_protocol::status flush(extent_protocol::extentid_t eid);
 };
 
 #endif 

@@ -10,6 +10,7 @@
 #include "lock_client.h"
 #include <unordered_map>
 #include "pthread.h"
+#include "extent_client.h"
 #include <unordered_set>
 
 // Classes that inherit lock_release_user can override dorelease so that 
@@ -20,6 +21,18 @@ public:
     virtual void dorelease(lock_protocol::lockid_t) = 0;
 
     virtual ~lock_release_user() {};
+};
+
+class lock_release_user_impl : public lock_release_user {
+public:
+    lock_release_user_impl(extent_client *ec) : client(ec) {};
+
+    void dorelease(lock_protocol::lockid_t lid) override {
+        assert(client->flush(lid) == extent_protocol::OK);
+    }
+
+private:
+    extent_client *client = nullptr;
 };
 
 
