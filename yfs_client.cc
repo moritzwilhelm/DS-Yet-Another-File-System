@@ -190,11 +190,9 @@ yfs_client::inum yfs_client::find_inum(inum di, const std::string &name) {
     }
 
     std::string dir_content;
-    puts("BEFORE FINDINUM GET");
     if (this->ec->get(di, dir_content) != extent_protocol::OK) {
         return 0;
     }
-    puts("AFTER FINDINUM GET");
 
     char *token = std::strtok(const_cast<char *>(dir_content.c_str()), ";");
     while (token) {
@@ -206,14 +204,11 @@ yfs_client::inum yfs_client::find_inum(inum di, const std::string &name) {
         token = std::strtok(nullptr, ";");
     }
 
-    puts("END OF FIND INUM");
     return 0;
 }
 
 yfs_client::inum yfs_client::lookup(inum di, std::string name) {
-    puts("GETTING LOOKUP LOCK");
     ScopedExtentLock scopedExtentLock(di, lc);
-    puts("GOT LOOKUP LOCK");
     inum r = find_inum(di, name);
     return r;
 }

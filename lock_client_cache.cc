@@ -83,9 +83,6 @@ void lock_client_cache::releaser() {
     lock(this->release_reqs_m);
     while (true) {
         for (lock_protocol::lockid_t lid : this->release_requests) {
-            //printf("RELEASER CLIENT\n");
-            //lock_protocol::lockid_t lid = this->release_requests.front();
-            //unlock(this->release_reqs_m);
             Lock &lock = this->get_lock(lid);
             lock(lock.mutex);
             while (lock.taken) {
@@ -93,17 +90,14 @@ void lock_client_cache::releaser() {
             }
 
             int r;
-            printf("RELEASER SENDS %llu %s\n", lid, this->id.c_str());
             // make sure the extent cache is flushed
             lu->dorelease(lid);
 
             assert(cl->call(lock_protocol::release, this->id, lock.acquire_seq_num, lid, r) == lock_protocol::OK);
-            printf("RELEASER HAS SEND %llu %s\n", lid, this->id.c_str());
             assert(lock.stat == Lock::RELEASING);
             lock.stat = Lock::NONE;
             broadcast(lock.server_release_called);
             unlock(lock.mutex);
-            //lock(this->release_reqs_m);
         }
         this->release_requests.clear();
         wait(revoke_called, this->release_reqs_m);
@@ -118,13 +112,11 @@ lock_protocol::status lock_client_cache::stat(lock_protocol::lockid_t lid) {
 }
 
 lock_protocol::status lock_client_cache::acquire(lock_protocol::lockid_t lid) {
-    //printf("ACQUIRE CLIENT %llu %s\n", lid, this->id.c_str());
     lock_protocol::status ret;
     lock(this->locks_m);
     Lock &lock = this->locks[lid];
     unlock(this->locks_m);
     lock(lock.mutex);
-    //printf("%s\n", lock.stat == Lock::FREE ? "FREE" : "NOT-FREE");
     switch (lock.stat) {
         case Lock::NONE:
             lock.stat = Lock::ACQUIRING;
@@ -135,7 +127,6 @@ lock_protocol::status lock_client_cache::acquire(lock_protocol::lockid_t lid) {
             if (ret == lock_protocol::OK) {
                 lock.stat = Lock::LOCKED;
             } else if (ret == lock_protocol::RETRY) {
-                //printf("WAITING FOR RETRY %llu %s\n", lid, this->id.c_str());
                 lock.stat = Lock::NONE;
                 wait(lock.retry_called, lock.mutex);
                 unlock(lock.mutex);
@@ -162,18 +153,15 @@ lock_protocol::status lock_client_cache::acquire(lock_protocol::lockid_t lid) {
             return acquire(lid);
     }
 
-    //printf("GRANTED CLIENT %llu %s\n", lid, this->id.c_str());
     lock.taken = true;
     unlock(lock.mutex);
     return lock_protocol::OK;
 }
 
 lock_protocol::status lock_client_cache::release(lock_protocol::lockid_t lid) {
-    //printf("RELEASE CLIENT %llu %s\n", lid, this->id.c_str());
     Lock &lock = this->get_lock(lid);
     // assert(lock.stat == Lock::LOCKED || lock.stat == Lock::RELEASING);
     lock(lock.mutex);
-    //printf("RELEASE %s\n", lock.stat == Lock::LOCKED ? "LOCKED" : "RELEASING");
     lock.taken = false;
     if (lock.stat == Lock::LOCKED) {
         lock.stat = Lock::FREE;
@@ -187,7 +175,6 @@ lock_protocol::status lock_client_cache::release(lock_protocol::lockid_t lid) {
 }
 
 rlock_protocol::status lock_client_cache::retry(lock_protocol::lockid_t lid, int &) {
-    //printf("RETRY CLIENT %llu %s\n", lid, this->id.c_str());
     Lock &lock = this->get_lock(lid);
     lock(lock.mutex);
     broadcast(lock.retry_called);
@@ -196,10 +183,8 @@ rlock_protocol::status lock_client_cache::retry(lock_protocol::lockid_t lid, int
 }
 
 rlock_protocol::status lock_client_cache::revoke(lock_protocol::lockid_t lid, int &) {
-    //printf("REVOKE CLIENT %llu %s\n", lid, this->id.c_str());
     Lock &lock = this->get_lock(lid);
     lock(lock.mutex);
-    //printf("%d\n", lock.stat);
     // assert(lock.stat == Lock::LOCKED || lock.stat == Lock::FREE);
     if (lock.stat == Lock::LOCKED || lock.stat == Lock::FREE) {
         lock.stat = Lock::RELEASING;

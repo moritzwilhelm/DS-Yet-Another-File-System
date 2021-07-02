@@ -13,7 +13,6 @@
 int extent_server::put(extent_protocol::extentid_t id, std::string buf, int &) {
     ScopedLock scoped_sl(&this->storage_lock);
 
-    printf("PUT SERVER called with eid %llu content %s\n", id, buf.c_str());
     Extent extent;
     if (this->storage.find(id) != this->storage.end()) {
         extent = this->storage.at(id);
@@ -40,10 +39,8 @@ int extent_server::get(extent_protocol::extentid_t id, std::string &buf) {
         extent.metadata.atime = std::time(nullptr);
 
         buf = extent.content;
-        printf("GET SERVER called with eid %llu content %s\n", id, buf.c_str());
         return extent_protocol::OK;
     }
-    printf("GET SERVER NOENT %llu\n", id);
     return extent_protocol::NOENT;
 }
 
