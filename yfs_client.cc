@@ -95,7 +95,7 @@ yfs_client::status yfs_client::setattr(inum id, fileinfo &info) {
 }
 
 yfs_client::status yfs_client::create(inum parent, const std::string &name, unsigned long &new_id) {
-    ScopedExtentLock scopedExtentLock(parent, lc);
+    ScopedExtentLock scopedParentLock(parent, lc);
 
     // check if parent exists
     std::string dir_content;
@@ -109,6 +109,7 @@ yfs_client::status yfs_client::create(inum parent, const std::string &name, unsi
         this->ec->get_next_id(0, new_id);
         // set file bit
         new_id |= 0x80000000;
+        ScopedExtentLock scopedChildLock(new_id, lc);
         this->ec->put(new_id, "");
 
         // add file to parent directory
@@ -120,7 +121,7 @@ yfs_client::status yfs_client::create(inum parent, const std::string &name, unsi
 }
 
 yfs_client::status yfs_client::mkdir(inum parent, const std::string &name, unsigned long &new_id) {
-    ScopedExtentLock scopedExtentLock(parent, lc);
+    ScopedExtentLock scopedParentLock(parent, lc);
 
     // check if parent exists
     std::string dir_content;
@@ -134,6 +135,7 @@ yfs_client::status yfs_client::mkdir(inum parent, const std::string &name, unsig
         this->ec->get_next_id(0, new_id);
         // set least significant bit to zero for directory
         new_id &= ~0x80000000;
+        ScopedExtentLock scopedChildLock(new_id, lc);
         this->ec->put(new_id, "");
 
         // add directory to parent directory
