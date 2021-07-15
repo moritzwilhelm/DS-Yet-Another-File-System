@@ -155,17 +155,11 @@ bool bind_client(rpcc *client) {
     return true;
 }
 
-void delay() {
-    srand(time(nullptr));
-    std::this_thread::sleep_for(std::chrono::milliseconds(rand() % 1000));
-    std::this_thread::sleep_for(std::chrono::milliseconds(rand() % 1000));
-}
-
 bool
 proposer::prepare(unsigned instance, std::vector<std::string> &accepts,
                   std::vector<std::string> nodes,
                   std::string &v) {
-    delay();
+    pthread_mutex_unlock(&pxs_mutex);
 
     prop_t highest_n_i = {0, ""};
 
@@ -190,15 +184,16 @@ proposer::prepare(unsigned instance, std::vector<std::string> &accepts,
         if (res.oldinstance) {
             acc->commit(res.n_a.n, res.v_a);
             printf("PREPARE oldinstance\n");
+            pthread_mutex_lock(&pxs_mutex);
             return false;
         } else if (!res.accept) {
             printf("PREPARE reject\n");
             // reset state
+            pthread_mutex_lock(&pxs_mutex);
             setn();
             accepts.clear();
             v.clear();
 
-            delay();
             return prepare(instance, accepts, nodes, v);
         } else {
             printf("PREPARE accept\n");
@@ -217,7 +212,9 @@ proposer::prepare(unsigned instance, std::vector<std::string> &accepts,
         }
 
     }
+
     printf("PREPARE SUCCESS\n");
+    pthread_mutex_lock(&pxs_mutex);
     return true;
 }
 
@@ -225,6 +222,7 @@ proposer::prepare(unsigned instance, std::vector<std::string> &accepts,
 void
 proposer::accept(unsigned instance, std::vector<std::string> &accepts,
                  std::vector<std::string> nodes, std::string v) {
+    pthread_mutex_unlock(&pxs_mutex);
     printf("ACCEPT %s\n", v.c_str());
     for (std::string &node: nodes) {
         printf("ACCEPT sending to %s\n", node.c_str());
@@ -244,13 +242,16 @@ proposer::accept(unsigned instance, std::vector<std::string> &accepts,
         }
         delete client;
     }
+
     printf("ACCEPT END\n");
+    pthread_mutex_lock(&pxs_mutex);
 }
 
 
 void
 proposer::decide(unsigned instance, std::vector<std::string> accepts,
                  std::string v) {
+    pthread_mutex_unlock(&pxs_mutex);
     printf("DECIDE\n");
     // acc->commit(instance, v); node commits via deciderequest to itself
     for (std::string &node : accepts) {
@@ -267,7 +268,9 @@ proposer::decide(unsigned instance, std::vector<std::string> accepts,
         client->call(paxos_protocol::rpc_numbers::decidereq, this->me, arg, r, rpcc::to(1000));
         delete client;
     }
+
     printf("DECIDE END\n");
+    pthread_mutex_lock(&pxs_mutex);
 }
 
 acceptor::acceptor(class paxos_change *_cfg, bool _first, std::string _me,
@@ -298,6 +301,7 @@ acceptor::acceptor(class paxos_change *_cfg, bool _first, std::string _me,
 paxos_protocol::status
 acceptor::preparereq(std::string src, paxos_protocol::preparearg a,
                      paxos_protocol::prepareres &r) {
+    pthread_mutex_lock(&pxs_mutex);
     printf("HANDLE PREPAREREQ src: %s\n", src.c_str());
     printf("received n: %d %s, n_h : %d %s\n", a.n.n, a.n.m.c_str(), n_a.n, n_a.m.c_str());
     // handle a preparereq message from proposer
@@ -324,12 +328,14 @@ acceptor::preparereq(std::string src, paxos_protocol::preparearg a,
         // reject proposal
         r.accept = false;
     }
-    return paxos_protocol::OK;
 
+    pthread_mutex_unlock(&pxs_mutex);
+    return paxos_protocol::OK;
 }
 
 paxos_protocol::status
 acceptor::acceptreq(std::string src, paxos_protocol::acceptarg a, int &r) {
+    pthread_mutex_lock(&pxs_mutex);
     printf("HANDLE ACCEPTREQ src: %s\n", src.c_str());
     printf("received n: %d %s, n_h : %d %s\n", a.n.n, a.n.m.c_str(), n_h.n, n_h.m.c_str());
     // handle an acceptreq message from proposer
@@ -349,19 +355,24 @@ acceptor::acceptreq(std::string src, paxos_protocol::acceptarg a, int &r) {
         r = false;
     }
 
+    pthread_mutex_unlock(&pxs_mutex);
     return paxos_protocol::OK;
 }
 
 paxos_protocol::status
 acceptor::decidereq(std::string src, paxos_protocol::decidearg a, int &r) {
+    pthread_mutex_lock(&pxs_mutex);
     printf("HANDLE DECIDEREQ src: %s\n", src.c_str());
     printf("reveiced value %s; instance: %d > instance_h %d\n", a.v.c_str(), a.instance, instance_h);
     // handle an decide message from proposer
 
     if (a.instance > instance_h) {
+        pthread_mutex_unlock(&pxs_mutex);
         commit(a.instance, a.v);
+        pthread_mutex_lock(&pxs_mutex);
     }
 
+    pthread_mutex_unlock(&pxs_mutex);
     return paxos_protocol::OK;
 }
 

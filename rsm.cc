@@ -144,7 +144,7 @@ rsm::recovery() {
                 printf("recovery: joined\n");
             } else {
                 assert(pthread_mutex_unlock(&rsm_mutex) == 0);
-                sleep(10); // XXX make another node in cfg primary?
+                sleep(5); // XXX make another node in cfg primary?
                 assert(pthread_mutex_lock(&rsm_mutex) == 0);
             }
         }
@@ -211,13 +211,6 @@ rsm::join(std::string m) {
     return true;
 }
 
-std::string findMin(std::vector<std::string> elements) {
-    auto stringLess = [](const std::string &x, const std::string &y) {
-        return std::stoi(x) < std::stoi(y);
-    };
-    return *std::min_element(elements.begin(), elements.end(), stringLess);
-}
-
 /*
  * Config informs rsm whenever it has successfully 
  * completed a view change
@@ -229,12 +222,7 @@ rsm::commit_change() {
     pthread_mutex_lock(&rsm_mutex);
 
     //check primary
-    if (!cfg->ismember(primary)) {
-        printf("RSM: NEW PRIMARY\n");
-        printf("%s\n", cfg->print_curview().c_str());
-        primary = findMin(cfg->get_curview());
-        printf("primary: %s\n", primary.c_str());
-    }
+    set_primary();
 
     // Lab 7:
     // - If I am not part of the new view, start recovery
