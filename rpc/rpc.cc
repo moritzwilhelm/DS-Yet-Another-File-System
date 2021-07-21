@@ -87,8 +87,7 @@ rpcc::caller::~caller() {
     assert(pthread_cond_destroy(&c) == 0);
 }
 
-inline
-void set_rand_seed() {
+inline void set_rand_seed() {
     struct timespec ts;
     clock_gettime(CLOCK_REALTIME, &ts);
     srandom((int) ts.tv_nsec ^ ((int) getpid()));
@@ -137,8 +136,7 @@ rpcc::~rpcc() {
     assert(pthread_mutex_destroy(&chan_m_) == 0);
 }
 
-int
-rpcc::bind(TO to) {
+int rpcc::bind(TO to) {
     int r;
     int ret = call(rpc_const::bind, 0, r, to);
     if (ret == 0) {
@@ -153,8 +151,7 @@ rpcc::bind(TO to) {
 };
 
 // Cancel all outstanding calls
-void
-rpcc::cancel(void) {
+void rpcc::cancel(void) {
     ScopedLock ml(&m_);
     printf("rpcc::cancel: force callers to fail\n");
     std::map<int, caller *>::iterator iter;
@@ -177,9 +174,8 @@ rpcc::cancel(void) {
     printf("rpcc::cancel: done\n");
 }
 
-int
-rpcc::call1(unsigned int proc, marshall &req, unmarshall &rep,
-            TO to) {
+int rpcc::call1(unsigned int proc, marshall &req, unmarshall &rep,
+                TO to) {
 
     caller ca(0, &rep);
     {
@@ -286,8 +282,7 @@ rpcc::call1(unsigned int proc, marshall &req, unmarshall &rep,
     return (ca.done ? ca.intret : rpc_const::timeout_failure);
 }
 
-void
-rpcc::get_refconn(connection **ch) {
+void rpcc::get_refconn(connection **ch) {
     ScopedLock ml(&chan_m_);
     if (!chan_ || chan_->isdead()) {
         if (chan_)
@@ -309,8 +304,7 @@ rpcc::get_refconn(connection **ch) {
 //this funtion must not block 
 //
 //this function keeps no reference for connection *c 
-bool
-rpcc::got_pdu(connection *c, char *b, int sz) {
+bool rpcc::got_pdu(connection *c, char *b, int sz) {
     unmarshall rep(b, sz);
     reply_header h;
     rep.unpack_reply_header(&h);
@@ -345,8 +339,7 @@ rpcc::got_pdu(connection *c, char *b, int sz) {
 }
 
 // assumes thread holds mutex m
-void
-rpcc::update_xid_rep(unsigned int xid) {
+void rpcc::update_xid_rep(unsigned int xid) {
     std::list<unsigned int>::iterator it;
 
     if (xid <= xid_rep_window_.front()) {
@@ -399,8 +392,7 @@ rpcs::~rpcs() {
     free_reply_window();
 }
 
-bool
-rpcs::got_pdu(connection *c, char *b, int sz) {
+bool rpcs::got_pdu(connection *c, char *b, int sz) {
     if (!reachable_) {
         jsl_log(JSL_DBG_1, "rpcss::got_pdu: not reachable\n");
         return true;
@@ -416,16 +408,14 @@ rpcs::got_pdu(connection *c, char *b, int sz) {
     return succ;
 }
 
-void
-rpcs::reg1(unsigned int proc, handler *h) {
+void rpcs::reg1(unsigned int proc, handler *h) {
     ScopedLock pl(&procs_m_);
     assert(procs_.count(proc) == 0);
     procs_[proc] = h;
     assert(procs_.count(proc) >= 1);
 }
 
-void
-rpcs::updatestat(unsigned int proc) {
+void rpcs::updatestat(unsigned int proc) {
     ScopedLock cl(&count_m_);
     counts_[proc]++;
     curr_counts_--;
@@ -452,8 +442,7 @@ rpcs::updatestat(unsigned int proc) {
     }
 }
 
-void
-rpcs::dispatch(djob_t *j) {
+void rpcs::dispatch(djob_t *j) {
     connection *c = j->conn;
     unmarshall req(j->buf, j->sz);
     delete j;
@@ -590,14 +579,26 @@ rpcs::dispatch(djob_t *j) {
     c->decref();
 }
 
-void
-rpcs::add_reply(unsigned int clt_nonce, unsigned int xid,
-                char *b, int sz) {
-    ScopedLock rwl(&reply_window_m_);
+// assumes thread holds mutex m
+auto rpcs::search_reply(unsigned int client_id, unsigned int req_id) {
+    std::list<reply_t> &l = reply_window_.at(client_id);
+    return std::find_if(l.begin(), l.end(), [req_id](reply_t &reply) { return reply.xid == req_id; });
 }
 
-void
-rpcs::free_reply_window(void) {
+void rpcs::add_reply(unsigned int clt_nonce, unsigned int xid,
+                     char *b, int sz) {
+    ScopedLock rwl(&reply_window_m_);
+
+    // search for current reply and assert it exists
+    auto it = this->search_reply(clt_nonce, xid);
+    assert(it != reply_window_.at(clt_nonce).end());
+    reply_t &reply = *it;
+    reply.cb_present = true;
+    reply.buf = b;
+    reply.sz = sz;
+}
+
+void rpcs::free_reply_window(void) {
     std::map<unsigned int, std::list<reply_t> >::iterator clt;
     std::list<reply_t>::iterator it;
 
@@ -611,24 +612,44 @@ rpcs::free_reply_window(void) {
     reply_window_.clear();
 }
 
-rpcs::rpcstate_t
-rpcs::checkduplicate_and_update(unsigned int clt_nonce, unsigned int xid,
-                                unsigned int xid_rep, char **b, int *sz) {
+rpcs::rpcstate_t rpcs::checkduplicate_and_update(unsigned int clt_nonce, unsigned int xid,
+                                                 unsigned int xid_rep, char **b, int *sz) {
     ScopedLock rwl(&reply_window_m_);
 
-    return NEW;
+    if (xid < xid_rep)
+        return FORGOTTEN;
+
+    std::list<reply_t> &client_window = this->reply_window_.at(clt_nonce);
+    auto cw_start = std::find_if(client_window.begin(), client_window.end(),
+                                 [xid_rep](reply_t &reply) { return reply.xid == xid_rep; });
+
+    // update reply window
+    if (cw_start != client_window.end())
+        client_window.remove_if([xid_rep](reply_t &reply) { return reply.xid < xid_rep; });
+
+    auto it = this->search_reply(clt_nonce, xid);
+    if (it == client_window.end()) {
+        client_window.emplace_back(reply_t(xid));
+        return NEW;
+    } else {
+        reply_t &reply = *it;
+        if (reply.cb_present) {
+            *b = reply.buf;
+            *sz = reply.sz;
+            return DONE;
+        }
+        return INPROGRESS;
+    }
 }
 
 //rpc handler
-int
-rpcs::rpcbind(int a, int &r) {
+int rpcs::rpcbind(int a, int &r) {
     jsl_log(JSL_DBG_2, "rpcs::rpcbind called return nonce %u\n", nonce_);
     r = nonce_;
     return 0;
 }
 
-void
-marshall::rawbyte(unsigned char x) {
+void marshall::rawbyte(unsigned char x) {
     if (_ind >= _capa) {
         _capa *= 2;
         assert (_buf != NULL);
@@ -638,8 +659,7 @@ marshall::rawbyte(unsigned char x) {
     _buf[_ind++] = x;
 }
 
-void
-marshall::rawbytes(const char *p, int n) {
+void marshall::rawbytes(const char *p, int n) {
     if ((_ind + n) > _capa) {
         _capa = _capa > n ? 2 * _capa : (_capa + n);
         assert (_buf != NULL);
@@ -650,34 +670,29 @@ marshall::rawbytes(const char *p, int n) {
     _ind += n;
 }
 
-marshall &
-operator<<(marshall &m, unsigned char x) {
+marshall &operator<<(marshall &m, unsigned char x) {
     m.rawbyte(x);
     return m;
 }
 
-marshall &
-operator<<(marshall &m, char x) {
+marshall &operator<<(marshall &m, char x) {
     m << (unsigned char) x;
     return m;
 }
 
 
-marshall &
-operator<<(marshall &m, unsigned short x) {
+marshall &operator<<(marshall &m, unsigned short x) {
     m.rawbyte((x >> 8) & 0xff);
     m.rawbyte(x & 0xff);
     return m;
 }
 
-marshall &
-operator<<(marshall &m, short x) {
+marshall &operator<<(marshall &m, short x) {
     m << (unsigned short) x;
     return m;
 }
 
-marshall &
-operator<<(marshall &m, unsigned int x) {
+marshall &operator<<(marshall &m, unsigned int x) {
     //network order is big-endian
     m.rawbyte((x >> 24) & 0xff);
     m.rawbyte((x >> 16) & 0xff);
@@ -686,36 +701,38 @@ operator<<(marshall &m, unsigned int x) {
     return m;
 }
 
-marshall &
-operator<<(marshall &m, int x) {
+marshall &operator<<(marshall &m, int x) {
     m << (unsigned int) x;
     return m;
 }
 
-marshall &
-operator<<(marshall &m, const std::string &s) {
+marshall &operator<<(marshall &m, const std::string &s) {
     m << (unsigned int) s.size();
     m.rawbytes(s.data(), s.size());
     return m;
 }
 
-marshall &
-operator<<(marshall &m, unsigned long long x) {
+marshall &operator<<(marshall &m, unsigned long long x) {
     m << (unsigned int) (x >> 32);
     m << (unsigned int) x;
     return m;
 }
 
-void
-marshall::pack(int x) {
+marshall &operator<<(marshall &m, unsigned long x) {
+    if (sizeof(unsigned long) == sizeof(unsigned int))
+        return m << (unsigned int) x;
+    if (sizeof(unsigned long) == sizeof(unsigned long long))
+        return m << (unsigned long long) x;
+}
+
+void marshall::pack(int x) {
     rawbyte((x >> 24) & 0xff);
     rawbyte((x >> 16) & 0xff);
     rawbyte((x >> 8) & 0xff);
     rawbyte(x & 0xff);
 }
 
-void
-unmarshall::unpack(int *x) {
+void unmarshall::unpack(int *x) {
     (*x) = (rawbyte() & 0xff) << 24;
     (*x) |= (rawbyte() & 0xff) << 16;
     (*x) |= (rawbyte() & 0xff) << 8;
@@ -723,8 +740,7 @@ unmarshall::unpack(int *x) {
 }
 
 //take the contents from another unmarshall object
-void
-unmarshall::take_in(unmarshall &another) {
+void unmarshall::take_in(unmarshall &another) {
     if (_buf)
         free(_buf);
     another.take_buf(&_buf, &_sz);
@@ -732,8 +748,7 @@ unmarshall::take_in(unmarshall &another) {
     _ok = _sz >= RPC_HEADER_SZ ? true : false;
 }
 
-bool
-unmarshall::okdone() {
+bool unmarshall::okdone() {
     if (ok() && _ind == _sz) {
         return true;
     } else {
@@ -741,8 +756,7 @@ unmarshall::okdone() {
     }
 }
 
-unsigned int
-unmarshall::rawbyte() {
+unsigned int unmarshall::rawbyte() {
     char c = 0;
     if (_ind >= _sz)
         _ok = false;
@@ -751,35 +765,30 @@ unmarshall::rawbyte() {
     return c;
 }
 
-unmarshall &
-operator>>(unmarshall &u, unsigned char &x) {
+unmarshall &operator>>(unmarshall &u, unsigned char &x) {
     x = (unsigned char) u.rawbyte();
     return u;
 }
 
-unmarshall &
-operator>>(unmarshall &u, char &x) {
+unmarshall &operator>>(unmarshall &u, char &x) {
     x = (char) u.rawbyte();
     return u;
 }
 
 
-unmarshall &
-operator>>(unmarshall &u, unsigned short &x) {
+unmarshall &operator>>(unmarshall &u, unsigned short &x) {
     x = (u.rawbyte() & 0xff) << 8;
     x |= u.rawbyte() & 0xff;
     return u;
 }
 
-unmarshall &
-operator>>(unmarshall &u, short &x) {
+unmarshall &operator>>(unmarshall &u, short &x) {
     x = (u.rawbyte() & 0xff) << 8;
     x |= u.rawbyte() & 0xff;
     return u;
 }
 
-unmarshall &
-operator>>(unmarshall &u, unsigned int &x) {
+unmarshall &operator>>(unmarshall &u, unsigned int &x) {
     x = (u.rawbyte() & 0xff) << 24;
     x |= (u.rawbyte() & 0xff) << 16;
     x |= (u.rawbyte() & 0xff) << 8;
@@ -787,8 +796,7 @@ operator>>(unmarshall &u, unsigned int &x) {
     return u;
 }
 
-unmarshall &
-operator>>(unmarshall &u, int &x) {
+unmarshall &operator>>(unmarshall &u, int &x) {
     x = (u.rawbyte() & 0xff) << 24;
     x |= (u.rawbyte() & 0xff) << 16;
     x |= (u.rawbyte() & 0xff) << 8;
@@ -796,8 +804,7 @@ operator>>(unmarshall &u, int &x) {
     return u;
 }
 
-unmarshall &
-operator>>(unmarshall &u, unsigned long long &x) {
+unmarshall &operator>>(unmarshall &u, unsigned long long &x) {
     unsigned int h, l;
     u >> h;
     u >> l;
@@ -805,8 +812,14 @@ operator>>(unmarshall &u, unsigned long long &x) {
     return u;
 }
 
-unmarshall &
-operator>>(unmarshall &u, std::string &s) {
+unmarshall &operator>>(unmarshall &u, unsigned long &x) {
+    if (sizeof(unsigned long) == sizeof(unsigned int))
+        return u >> (unsigned int &) x;
+    if (sizeof(unsigned long) == sizeof(unsigned long long))
+        return u >> (unsigned long long &) x;
+}
+
+unmarshall &operator>>(unmarshall &u, std::string &s) {
     unsigned sz;
     u >> sz;
     if (u.ok())
@@ -814,8 +827,7 @@ operator>>(unmarshall &u, std::string &s) {
     return u;
 }
 
-void
-unmarshall::rawbytes(std::string &ss, unsigned int n) {
+void unmarshall::rawbytes(std::string &ss, unsigned int n) {
     if ((_ind + n) > (unsigned) _sz) {
         _ok = false;
     } else {
@@ -826,22 +838,6 @@ unmarshall::rawbytes(std::string &ss, unsigned int n) {
     }
 }
 
-marshall &
-operator<<(marshall &m, unsigned long x) {
-    if (sizeof(unsigned long) == sizeof(unsigned int))
-        return m << (unsigned int) x;
-    if (sizeof(unsigned long) == sizeof(unsigned long long))
-        return m << (unsigned long long) x;
-}
-
-unmarshall &
-operator>>(unmarshall &u, unsigned long &x) {
-    if (sizeof(unsigned long) == sizeof(unsigned int))
-        return u >> (unsigned int &) x;
-    if (sizeof(unsigned long) == sizeof(unsigned long long))
-        return u >> (unsigned long long &) x;
-}
-
 bool operator<(const sockaddr_in &a, const sockaddr_in &b) {
     return ((a.sin_addr.s_addr < b.sin_addr.s_addr) ||
             ((a.sin_addr.s_addr == b.sin_addr.s_addr) &&
@@ -849,8 +845,7 @@ bool operator<(const sockaddr_in &a, const sockaddr_in &b) {
 }
 
 /*---------------auxilary function--------------*/
-void
-make_sockaddr(const char *hostandport, struct sockaddr_in *dst) {
+void make_sockaddr(const char *hostandport, struct sockaddr_in *dst) {
 
     char host[200];
     const char *localhost = "127.0.0.1";
@@ -868,8 +863,7 @@ make_sockaddr(const char *hostandport, struct sockaddr_in *dst) {
 
 }
 
-void
-make_sockaddr(const char *host, const char *port, struct sockaddr_in *dst) {
+void make_sockaddr(const char *host, const char *port, struct sockaddr_in *dst) {
 
     in_addr_t a;
 
@@ -890,8 +884,7 @@ make_sockaddr(const char *host, const char *port, struct sockaddr_in *dst) {
     dst->sin_port = htons(atoi(port));
 }
 
-int
-cmp_timespec(const struct timespec &a, const struct timespec &b) {
+int cmp_timespec(const struct timespec &a, const struct timespec &b) {
     if (a.tv_sec > b.tv_sec)
         return 1;
     else if (a.tv_sec < b.tv_sec)
@@ -906,8 +899,7 @@ cmp_timespec(const struct timespec &a, const struct timespec &b) {
     }
 }
 
-void
-add_timespec(const struct timespec &a, int b, struct timespec *result) {
+void add_timespec(const struct timespec &a, int b, struct timespec *result) {
     // convert to millisec, add timeout, convert back
     result->tv_sec = a.tv_sec + b / 1000;
     result->tv_nsec = a.tv_nsec + (b % 1000) * 1000000;
@@ -918,8 +910,7 @@ add_timespec(const struct timespec &a, int b, struct timespec *result) {
     }
 }
 
-int
-diff_timespec(const struct timespec &end, const struct timespec &start) {
+int diff_timespec(const struct timespec &end, const struct timespec &start) {
     int diff = (end.tv_sec > start.tv_sec) ? (end.tv_sec - start.tv_sec) * 1000 : 0;
     assert(diff || end.tv_sec == start.tv_sec);
     if (end.tv_nsec > start.tv_nsec) {

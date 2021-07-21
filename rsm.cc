@@ -151,7 +151,7 @@ rsm::recovery() {
                 printf("recovery: joined\n");
             } else {
                 assert(pthread_mutex_unlock(&rsm_mutex) == 0);
-                sleep(30); // XXX make another node in cfg primary?
+                sleep(5); // XXX make another node in cfg primary?
                 assert(pthread_mutex_lock(&rsm_mutex) == 0);
             }
         }
@@ -239,7 +239,6 @@ rsm::join(std::string m) {
     return true;
 }
 
-
 /*
  * Config informs rsm whenever it has successfully 
  * completed a view change
@@ -247,12 +246,21 @@ rsm::join(std::string m) {
 
 void
 rsm::commit_change() {
+    printf("RSM: COMMIT CHANGE\n");
     pthread_mutex_lock(&rsm_mutex);
+
+    //check primary
+    set_primary();
+
     // Lab 7:
     // - If I am not part of the new view, start recovery
+    if (!cfg->ismember(cfg->myaddr())) {
+        printf("RSM: not part of new view\n");
+        printf("primary: %s\n", primary.c_str());
+        assert(pthread_cond_signal(&recovery_cond) == 0);
+    }
     pthread_mutex_unlock(&rsm_mutex);
 }
-
 
 std::string
 rsm::execute(int procno, std::string req) {
@@ -339,6 +347,10 @@ rsm::joinreq(std::string m, viewstamp last, rsm_protocol::joinres &r) {
         ret = rsm_client_protocol::BUSY;
     } else {
         // Lab 7: invoke config to create a new view that contains m
+        assert (pthread_mutex_unlock(&rsm_mutex) == 0);
+        cfg->add(m);
+        assert (pthread_mutex_lock(&rsm_mutex) == 0);
+        r.log = cfg->dump();
     }
     assert (pthread_mutex_unlock(&rsm_mutex) == 0);
     return ret;
@@ -377,9 +389,19 @@ rsm::set_primary() {
     }
 
     assert(p.size() > 0);
+    std::vector<unsigned long long> memsi;
     for (unsigned i = 0; i < p.size(); i++) {
-        if (isamember(p[i], c)) {
-            primary = p[i];
+        std::istringstream ist(p[i]);
+        unsigned long long mem;
+        ist >> mem;
+        memsi.push_back(mem);
+    }
+    std::sort(memsi.begin(), memsi.end());
+    for (unsigned i = 0; i < memsi.size(); i++) {
+        std::stringstream sst;
+        sst << memsi[i];
+        if (isamember(sst.str(), c)) {
+            primary = sst.str();
             printf("set_primary: primary is %s\n", primary.c_str());
             return;
         }
@@ -477,7 +499,3 @@ rsm::breakpointreq(int b, int &r) {
     assert(pthread_mutex_unlock(&rsm_mutex) == 0);
     return r;
 }
-
-
-
-

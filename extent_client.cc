@@ -3,55 +3,168 @@
 #include "extent_client.h"
 #include <sstream>
 #include <iostream>
+#include <utility>
 #include <stdio.h>
 #include <unistd.h>
 #include <time.h>
 
 // The calls assume that the caller holds a lock on the extent
 
-extent_client::extent_client(std::string dst)
-{
-  sockaddr_in dstsock;
-	make_sockaddr(dst.c_str(), &dstsock);
-  cl = new rpcc(dstsock);
-  if (cl->bind() != 0) {
-    printf("extent_client: bind failed\n");
-  }
+extent_client::extent_client(std::string dst) {
+    sockaddr_in dstsock;
+    make_sockaddr(dst.c_str(), &dstsock);
+    cl = new rpcc(dstsock);
+    if (cl->bind() != 0) {
+        printf("extent_client: bind failed\n");
+    }
+
+    assert(pthread_mutex_init(&this->storage_lock, nullptr) == 0);
 }
 
-extent_protocol::status
-extent_client::get(extent_protocol::extentid_t eid, std::string &buf)
-{
-  extent_protocol::status ret = extent_protocol::OK;
-  ret = cl->call(extent_protocol::get, eid, buf);
-  return ret;
+extent_client::~extent_client() {
+    assert(pthread_mutex_destroy(&this->storage_lock) == 0);
 }
 
-extent_protocol::status
-extent_client::getattr(extent_protocol::extentid_t eid, 
-		       extent_protocol::attr &attr)
-{
-  extent_protocol::status ret = extent_protocol::OK;
-  ret = cl->call(extent_protocol::getattr, eid, attr);
-  return ret;
+extent_protocol::status extent_client::put(extent_protocol::extentid_t eid, std::string buf) {
+    ScopedLock scopedLock(&this->storage_lock);
+
+    Extent extent;
+    if (this->storage.find(eid) == this->storage.end()) {
+        // new local extent
+        extent.is_new = true;
+    } else {
+        // existing local extent
+        extent = this->storage.at(eid);
+        extent.present = true;
+
+        // update metadata
+        time_t current_time = std::time(nullptr);
+        extent.metadata.mtime = current_time;
+        extent.metadata.ctime = current_time;
+    }
+
+    extent.content = buf;
+    extent.metadata.size = buf.size();
+    extent.dirty = true;
+
+    // add or update extent in cache
+    this->storage[eid] = extent;
+    return extent_protocol::OK;
 }
 
-extent_protocol::status
-extent_client::put(extent_protocol::extentid_t eid, std::string buf)
-{
-  extent_protocol::status ret = extent_protocol::OK;
-  int r;
-  ret = cl->call(extent_protocol::put, eid, buf, r);
-  return ret;
+extent_protocol::status extent_client::get(extent_protocol::extentid_t eid, std::string &buf) {
+    ScopedLock sl(&this->storage_lock);
+
+    if (this->storage.find(eid) == this->storage.end()) {
+        // get extent from server if not cached
+        Extent extent;
+        if (cl->call(extent_protocol::get, eid, extent.content) != extent_protocol::OK) {
+            return extent_protocol::NOENT;
+        }
+        assert(cl->call(extent_protocol::getattr, eid, extent.metadata) == extent_protocol::OK);
+        this->storage[eid] = extent;
+
+        buf = extent.content;
+        return extent_protocol::OK;
+    } else if (this->storage.at(eid).present) {
+        // update access time of local extent
+        Extent &extent = this->storage.at(eid);
+        extent.metadata.atime = std::time(nullptr);
+        extent.dirty = true;
+
+        buf = extent.content;
+        return extent_protocol::OK;
+    } else {
+        // local extent was already deleted by call to remove
+        return extent_protocol::NOENT;
+    }
 }
 
-extent_protocol::status
-extent_client::remove(extent_protocol::extentid_t eid)
-{
-  extent_protocol::status ret = extent_protocol::OK;
-  int r;
-  ret = cl->call(extent_protocol::remove, eid, r);
-  return ret;
+extent_protocol::status extent_client::getattr(extent_protocol::extentid_t eid, extent_protocol::attr &attr) {
+    ScopedLock scopedLock(&this->storage_lock);
+
+    // get extent from server if not cached
+    if (this->storage.find(eid) == this->storage.end()) {
+        Extent extent;
+        if (cl->call(extent_protocol::get, eid, extent.content) != extent_protocol::OK) {
+            return extent_protocol::NOENT;
+        }
+        assert(cl->call(extent_protocol::getattr, eid, extent.metadata) == extent_protocol::OK);
+        this->storage[eid] = extent;
+    } else if (!this->storage.at(eid).present) {
+        return extent_protocol::NOENT;
+    }
+
+    attr = this->storage.at(eid).metadata;
+    return extent_protocol::OK;
 }
 
+extent_protocol::status extent_client::setattr(extent_protocol::extentid_t eid, extent_protocol::attr attr) {
+    ScopedLock scopedLock(&this->storage_lock);
 
+    // get extent from server if not cached
+    if (this->storage.find(eid) == this->storage.end()) {
+        Extent extent;
+        if (cl->call(extent_protocol::get, eid, extent.content) != extent_protocol::OK) {
+            return extent_protocol::NOENT;
+        }
+        assert(cl->call(extent_protocol::getattr, eid, extent.metadata) == extent_protocol::OK);
+        this->storage[eid] = extent;
+    } else if (!this->storage.at(eid).present) {
+        return extent_protocol::NOENT;
+    }
+
+    Extent &extent = this->storage.at(eid);
+    extent.content.resize(attr.size);
+    extent.metadata = attr;
+    extent.dirty = true;
+    return extent_protocol::OK;
+}
+
+extent_protocol::status extent_client::remove(extent_protocol::extentid_t eid) {
+    ScopedLock scopedLock(&this->storage_lock);
+
+    // get extent from server if not cached
+    if (this->storage.find(eid) == this->storage.end()) {
+        Extent extent;
+        if (cl->call(extent_protocol::get, eid, extent.content) != extent_protocol::OK) {
+            return extent_protocol::NOENT;
+        }
+        assert(cl->call(extent_protocol::getattr, eid, extent.metadata) == extent_protocol::OK);
+        this->storage[eid] = extent;
+    } else if (!this->storage.at(eid).present) {
+        return extent_protocol::NOENT;
+    }
+
+    if (this->storage.find(eid) != this->storage.end() && this->storage.at(eid).present) {
+        Extent &extent = this->storage.at(eid);
+        extent.present = false;
+    }
+    return extent_protocol::OK;
+}
+
+extent_protocol::status extent_client::get_next_id(extent_protocol::extentid_t id, unsigned long &res) {
+    return cl->call(extent_protocol::get_next_id, id, res);
+}
+
+extent_protocol::status extent_client::flush(extent_protocol::extentid_t eid) {
+    ScopedLock scopedLock(&this->storage_lock);
+
+    assert(this->storage.find(eid) != this->storage.end());
+    Extent &extent = this->storage.at(eid);
+
+    int r; // dummy for rpc
+
+    if (!extent.present && !extent.is_new) {
+        // delete removed local extent on server
+        assert(this->cl->call(extent_protocol::remove, eid, r) == extent_protocol::OK);
+    } else if (extent.present && extent.dirty) {
+        // update modified local extent on server
+        assert(this->cl->call(extent_protocol::put, eid, extent.content, r) == extent_protocol::OK);
+        assert(this->cl->call(extent_protocol::setattr, eid, extent.metadata, r) == extent_protocol::OK);
+    }
+
+    // delete local extent from cache
+    this->storage.erase(eid);
+    return extent_protocol::OK;
+}
