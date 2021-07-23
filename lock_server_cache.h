@@ -12,9 +12,11 @@
 #include "pthread.h"
 
 #include "rsm.h"
-class lock_server_cache : public lock_server {
+
+class lock_server_cache : public lock_server, public rsm_state_transfer {
 private:
     class rsm *rsm;
+
     std::unordered_map<std::string, rpcc *> lock_clients;
 
     struct Lock {
@@ -70,6 +72,47 @@ public:
     void revoker();
 
     void retryer();
+
+
+    std::string marshal_state() override {
+        // lock any needed mutexes
+        ScopedLock scopedLock(&this->server_lock);
+
+        marshall rep;
+        rep << locks.size();
+        std::unordered_map<lock_protocol::lockid_t, Lock>::iterator iter_lock;
+        for (iter_lock = locks.begin(); iter_lock != locks.end(); iter_lock++) {
+            lock_protocol::lockid_t lid = iter_lock->first;
+            Lock lock = locks[lid];
+            rep << lid;
+            rep << lock.owner;
+            rep << lock.waiters;
+            rep << lock.revoked;
+        }
+        // unlock any mutexes
+        return rep.str();
+    }
+
+    void unmarshal_state(std::string state) override {
+        // lock any needed mutexes
+        ScopedLock scopedLock(&this->server_lock);
+
+        unmarshall rep(state);
+        unsigned int locks_size;
+        rep >> locks_size;
+        for (unsigned int i = 0; i < locks_size; i++) {
+            lock_protocol::lockid_t lid;
+            rep >> lid;
+            Lock lock{};
+            rep >> lock.owner;
+            rep >> lock.waiters;
+            int revoked;
+            rep >> revoked;
+            lock.revoked = (bool) (revoked);
+            locks[lid] = lock;
+        }
+        // unlock any mutexes
+    }
 };
 
 #endif

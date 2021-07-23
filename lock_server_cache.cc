@@ -44,6 +44,8 @@ lock_server_cache::lock_server_cache(class rsm *_rsm) : lock_server(), rsm(_rsm)
     assert(pthread_cond_init(&this->revoke_ready, nullptr) == 0);
     assert(pthread_cond_init(&this->retry_ready, nullptr) == 0);
 
+    rsm->set_state_transfer(this);
+
     pthread_t th;
     int r = pthread_create(&th, NULL, &revokethread, (void *) this);
     assert(r == 0);
