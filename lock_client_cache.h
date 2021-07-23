@@ -11,6 +11,7 @@
 #include <unordered_map>
 #include "pthread.h"
 #include "extent_client.h"
+#include "rsm_client.h"
 #include <unordered_set>
 
 // Classes that inherit lock_release_user can override dorelease so that 
@@ -88,6 +89,8 @@ private:
 
 class lock_client_cache : public lock_client {
 private:
+    rsm_client *client;
+
     class lock_release_user *lu;
 
     int rlock_port;

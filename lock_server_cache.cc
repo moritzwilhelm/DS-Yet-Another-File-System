@@ -113,6 +113,10 @@ void lock_server_cache::retryer() {
 }
 
 lock_protocol::status lock_server_cache::stat(std::string client, lock_protocol::lockid_t lid, int &r) {
+    if (!rsm->amiprimary()) {
+        printf("STAT not the primary\n");
+        return lock_protocol::RPCERR;
+    }
     lock_protocol::status ret = lock_protocol::OK;
     printf("stat request from clt %s\n", client.c_str());
     r = nacquire;
@@ -121,12 +125,16 @@ lock_protocol::status lock_server_cache::stat(std::string client, lock_protocol:
 
 lock_protocol::status
 lock_server_cache::acquire(std::string client, unsigned int seq_num, lock_protocol::lockid_t lid, int &) {
-    //printf("ACQUIRE SERVER %llu %s\n", lid, client.c_str());
+    if (!rsm->amiprimary()) {
+        printf("ACQUIRE not the primary\n");
+        return lock_protocol::RPCERR;
+    }
+    printf("ACQUIRE SERVER %llu %s\n", lid, client.c_str());
     ScopedLock scopedLock(&this->server_lock);
     Lock &lock = this->locks[lid];
     if (lock.owner.empty()) {
         lock = Lock(client);
-        //printf("GRANTED SERVER %llu %s\n", lid, client.c_str());
+        printf("GRANTED SERVER %llu %s\n", lid, client.c_str());
         return lock_protocol::OK;
     } else {
         lock.waiters.push_back(client);
@@ -135,13 +143,19 @@ lock_server_cache::acquire(std::string client, unsigned int seq_num, lock_protoc
             signal(revoke_ready);
             lock.revoked = true;
         }
+        printf("NOT GRANTED SERVER %llu %s\n", lid, client.c_str());
+        printf("value %d\n", lock_protocol::RETRY);
         return lock_protocol::RETRY;
     }
 }
 
 lock_protocol::status
 lock_server_cache::release(std::string client, unsigned int seq_num, lock_protocol::lockid_t lid, int &) {
-    //printf("RELEASE SERVER %llu %s\n", lid, client.c_str());
+    if (!rsm->amiprimary()) {
+        printf("RELEASE not the primary\n");
+        return lock_protocol::RPCERR;
+    }
+    printf("RELEASE SERVER %llu %s\n", lid, client.c_str());
     ScopedLock scopedLock(&this->server_lock);
     Lock &lock = this->locks.at(lid);
     if (lock.owner != client) {
