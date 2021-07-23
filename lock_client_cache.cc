@@ -91,8 +91,9 @@ void lock_client_cache::releaser() {
 
             int r;
             // make sure the extent cache is flushed
-            lu->dorelease(lid);
-
+            if (lu != nullptr) {
+                lu->dorelease(lid);
+            }
             assert(cl->call(lock_protocol::release, this->id, lock.acquire_seq_num, lid, r) == lock_protocol::OK);
             assert(lock.stat == Lock::RELEASING);
             lock.stat = Lock::NONE;
@@ -163,9 +164,9 @@ lock_protocol::status lock_client_cache::release(lock_protocol::lockid_t lid) {
     // assert(lock.stat == Lock::LOCKED || lock.stat == Lock::RELEASING);
     lock(lock.mutex);
     lock.taken = false;
+    broadcast(lock.local_release_called); // reset clients in locked state
     if (lock.stat == Lock::LOCKED) {
         lock.stat = Lock::FREE;
-        broadcast(lock.local_release_called);
     } else {
         broadcast(lock.release_ready_perfectly);
     }
