@@ -75,6 +75,10 @@ void lock_server_cache::revoker() {
             RevokeRequest rr = this->revoke_requests.front();
             this->revoke_requests.pop();
 
+            if (!rsm->amiprimary()) {
+                continue;
+            }
+
             int r;
             //printf("REVOKER SENDS %llu %s\n", rr.lid, rr.owner.c_str());
             rpcc *client = this->get_client(rr.owner);
@@ -100,6 +104,10 @@ void lock_server_cache::retryer() {
             RetryRequest rr = this->retry_requests.front();
             this->retry_requests.pop();
 
+            if (!rsm->amiprimary()) {
+                continue;
+            }
+
             int r;
             for (std::string &waiter: rr.waiters) {
                 //printf("RETRYER SENDS %llu %s\n", rr.lid, waiter.c_str());
@@ -115,10 +123,6 @@ void lock_server_cache::retryer() {
 }
 
 lock_protocol::status lock_server_cache::stat(std::string client, lock_protocol::lockid_t lid, int &r) {
-    if (!rsm->amiprimary()) {
-        printf("STAT not the primary\n");
-        return lock_protocol::RPCERR;
-    }
     lock_protocol::status ret = lock_protocol::OK;
     printf("stat request from clt %s\n", client.c_str());
     r = nacquire;
@@ -127,10 +131,6 @@ lock_protocol::status lock_server_cache::stat(std::string client, lock_protocol:
 
 lock_protocol::status
 lock_server_cache::acquire(std::string client, unsigned int seq_num, lock_protocol::lockid_t lid, int &) {
-    if (!rsm->amiprimary()) {
-        printf("ACQUIRE not the primary\n");
-        return lock_protocol::RPCERR;
-    }
     printf("ACQUIRE SERVER %llu %s\n", lid, client.c_str());
     ScopedLock scopedLock(&this->server_lock);
     Lock &lock = this->locks[lid];
@@ -153,10 +153,6 @@ lock_server_cache::acquire(std::string client, unsigned int seq_num, lock_protoc
 
 lock_protocol::status
 lock_server_cache::release(std::string client, unsigned int seq_num, lock_protocol::lockid_t lid, int &) {
-    if (!rsm->amiprimary()) {
-        printf("RELEASE not the primary\n");
-        return lock_protocol::RPCERR;
-    }
     printf("RELEASE SERVER %llu %s\n", lid, client.c_str());
     ScopedLock scopedLock(&this->server_lock);
     Lock &lock = this->locks.at(lid);
