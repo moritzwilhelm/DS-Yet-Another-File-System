@@ -146,7 +146,7 @@ rsm::recovery() {
     assert(pthread_mutex_lock(&rsm_mutex) == 0);
     inviewchange = false;
 
-    while (1) {
+    while (true) {
         while (!cfg->ismember(cfg->myaddr())) {
             if (join(primary)) {
                 printf("recovery: joined\n");
@@ -157,7 +157,23 @@ rsm::recovery() {
             }
         }
 
-        if (r) inviewchange = false;
+        if (inviewchange) {
+            printf("trying to recover state\n");
+            if (primary == cfg->myaddr()) {
+                r = sync_with_backups();
+            } else {
+                r = sync_with_primary();
+            }
+        }
+
+        if (r) {
+            printf("recovered state successfully\n");
+            myvs.vid = cfg->vid();
+            myvs.seqno = 1;
+            inviewchange = false;
+            r = false;
+        }
+
         printf("recovery: go to sleep %d %d\n", insync, inviewchange);
         pthread_cond_wait(&recovery_cond, &rsm_mutex);
     }
@@ -166,15 +182,52 @@ rsm::recovery() {
 
 bool
 rsm::sync_with_backups() {
-    // For lab 8
+    printf("trying to sync with backups\n");
+    insync = true;
+
+    // wait until everyone synced
+
+    std::vector<std::string> prev_view = cfg->get_prevview();
+    std::vector<std::string> cur_view = cfg->get_curview();
+
+    backups.clear();
+
+    for (const std::string &node : cfg->get_curview()) {
+        if (node == cfg->myaddr()) {
+            continue;
+        }
+        if (std::find(prev_view.begin(), prev_view.end(), node) != prev_view.end()) {
+            printf("will wait for %s\n", node.c_str());
+            backups.insert(node);
+        }
+    }
+
+    nbackup = backups.size();
+    printf("wait for %d backups\n", nbackup);
+    while (nbackup > 0) {
+        pthread_cond_wait(&sync_cond, &rsm_mutex);
+    }
+
+    printf("finish wait for backups\n");
+    insync = false;
     return true;
 }
 
 
 bool
 rsm::sync_with_primary() {
+    printf("trying to sync with primary\n");
     // For lab 8
-    return true;
+    if (statetransfer(primary)) {
+        printf("synced successfully with primary\n");
+        if (statetransferdone(primary)) {
+            printf("statetransferdone successfully with primary\n");
+            return true;
+        }
+        printf("statetransferdone failed with primary\n");
+    }
+    printf("sync failed with primary\n");
+    return false;
 }
 
 
@@ -211,8 +264,17 @@ rsm::statetransfer(std::string m) {
 
 bool
 rsm::statetransferdone(std::string m) {
-    // For lab 8
-    return true;
+    handle h(m);
+    rpcc *client = h.get_rpcc();
+    if (!client) {
+        return false;
+    }
+
+    int dummy;
+    assert(pthread_mutex_unlock(&rsm_mutex) == 0);
+    rsm_protocol::status ret = client->call(rsm_protocol::transferdonereq, cfg->myaddr(), dummy, rpcc::to(1000));
+    assert(pthread_mutex_lock(&rsm_mutex) == 0);
+    return ret == rsm_protocol::OK;
 }
 
 
@@ -249,6 +311,9 @@ void
 rsm::commit_change() {
     printf("RSM: COMMIT CHANGE\n");
     pthread_mutex_lock(&rsm_mutex);
+    printf("VIEW: %s\n", cfg->print_curview().c_str());
+
+    inviewchange = true;
 
     //check primary
     set_primary();
@@ -258,8 +323,11 @@ rsm::commit_change() {
     if (!cfg->ismember(cfg->myaddr())) {
         printf("RSM: not part of new view\n");
         printf("primary: %s\n", primary.c_str());
-        assert(pthread_cond_signal(&recovery_cond) == 0);
     }
+    // Lab 8:
+    // - Always recover
+    assert(pthread_cond_signal(&recovery_cond) == 0);
+
     pthread_mutex_unlock(&rsm_mutex);
 }
 
@@ -286,7 +354,7 @@ rsm::execute(int procno, std::string req) {
 //
 rsm_client_protocol::status
 rsm::client_invoke(int procno, std::string req, std::string &r) {
-    printf("client invoke called: %s\n", req.c_str());
+    printf("client invoke called: %d\n", procno);
     int ret = rsm_protocol::OK;
 
     assert(pthread_mutex_lock(&rsm_mutex) == 0);
@@ -299,58 +367,45 @@ rsm::client_invoke(int procno, std::string req, std::string &r) {
         printf("client invoke NOTPRIMARY\n");
         ret = rsm_client_protocol::NOTPRIMARY;
     } else {
+        // serialize requests using invoke mutex
+        ScopedLock scopedLock(&invoke_mutex);
+
         // assign the RPC the next viewstamp number in sequence
         assert(pthread_mutex_lock(&rsm_mutex) == 0);
-        myvs.vid = cfg->vid();
-        myvs.seqno = last_myvs.seqno + 1;
-        assert(pthread_mutex_unlock(&rsm_mutex) == 0);
-        // send an rsm_protocol::invoke RPC to all slaves in the current view
-        assert(pthread_mutex_lock(&invoke_mutex) == 0);
-        printf("client invoke start sending: VS %d %d\n", myvs.vid, myvs.seqno);
-        for (std::string &node :cfg->get_curview()) {
-            if (node == cfg->myaddr()) {
-                continue;
-            }
-            handle h(node);
-            rpcc *client = h.get_rpcc();
-            if (!client) {
-                printf("client bind fail %s\n", node.c_str());
-
-                assert(pthread_mutex_lock(&rsm_mutex) == 0);
-                last_myvs = myvs;
-                assert(pthread_mutex_unlock(&rsm_mutex) == 0);
-
-                assert(pthread_mutex_unlock(&invoke_mutex) == 0);
-                return rsm_protocol::ERR;
-            }
-
-            int dummy;
-            printf("before sending invoke req\n");
-            rsm_protocol::status state = client->call(rsm_protocol::invoke, procno, myvs, req,
-                                                      dummy, rpcc::to(1000));
-
-            printf("after sending invoke req\n");
-
-            if (state != rsm_protocol::OK) {
-                // instruct Paxos object to initiate a view change?
-                printf("invoke returned not OK\n");
-
-                assert(pthread_mutex_lock(&rsm_mutex) == 0);
-                last_myvs = myvs;
-                assert(pthread_mutex_unlock(&rsm_mutex) == 0);
-
-                assert(pthread_mutex_unlock(&invoke_mutex) == 0);
-                return rsm_protocol::ERR;
-            }
-        }
-        r = execute(procno, req);
-
-        assert(pthread_mutex_lock(&rsm_mutex) == 0);
+        viewstamp vs = myvs;
         last_myvs = myvs;
         myvs.seqno += 1;
         assert(pthread_mutex_unlock(&rsm_mutex) == 0);
 
-        assert(pthread_mutex_unlock(&invoke_mutex) == 0);
+        // send an rsm_protocol::invoke RPC to all slaves in the current view
+        printf("client invoke start sending: VS %d %d\n", vs.vid, vs.seqno);
+        for (std::string &node :cfg->get_curview()) {
+            if (node == cfg->myaddr()) {
+                continue;
+            }
+
+            handle h(node);
+            rpcc *client = h.get_rpcc();
+            if (!client) {
+                // instruct Paxos object to initiate a view change?
+                printf("client bind fail %s\n", node.c_str());
+                return rsm_protocol::ERR;
+            }
+
+            int dummy;
+            printf("before sending invoke req to %s\n", node.c_str());
+            rsm_protocol::status state = client->call(rsm_protocol::invoke, procno, vs, req,
+                                                      dummy, rpcc::to(1000));
+
+            printf("after sending invoke req to %s\n", node.c_str());
+
+            if (state != rsm_protocol::OK) {
+                // instruct Paxos object to initiate a view change?
+                printf("invoke returned not OK\n");
+                return rsm_protocol::ERR;
+            }
+        }
+        r = execute(procno, req);
     }
 
     return ret;
@@ -366,21 +421,23 @@ rsm::client_invoke(int procno, std::string req, std::string &r) {
 rsm_protocol::status
 rsm::invoke(int proc, viewstamp vs, std::string req, int &dummy) {
     printf("invoke called vs: %u %u\n", vs.vid, vs.seqno);
-    assert(pthread_mutex_lock(&rsm_mutex) == 0);
     rsm_protocol::status ret = rsm_protocol::OK;
-    viewstamp expected(cfg->vid(), last_myvs.seqno + 1);
+    assert(pthread_mutex_lock(&rsm_mutex) == 0);
+    myvs.vid = cfg->vid();
     assert(pthread_mutex_unlock(&rsm_mutex) == 0);
-    if (vs == expected && cfg->ismember(cfg->myaddr())) {
+    if (vs == myvs && cfg->ismember(cfg->myaddr())) {
         execute(proc, req);
         assert(pthread_mutex_lock(&rsm_mutex) == 0);
-        last_myvs = expected;
+        last_myvs = myvs;
+        myvs.seqno += 1;
         assert(pthread_mutex_unlock(&rsm_mutex) == 0);
+        printf("invoke success, next vs: %u %u\n", myvs.vid, myvs.seqno);
     } else {
         printf("Unexpected VS %u %u\n", vs.vid, vs.seqno);
-        printf("Expected VS %u %u\n", expected.vid, expected.seqno);
+        printf("Expected VS %u %u\n", myvs.vid, myvs.seqno);
+        printf("Last VS %u %u\n", last_myvs.vid, last_myvs.seqno);
         ret = rsm_protocol::ERR;
     }
-    // For lab 8
     return ret;
 }
 
@@ -405,9 +462,20 @@ rsm::transferreq(std::string src, viewstamp last, rsm_protocol::transferres &r) 
   */
 rsm_protocol::status
 rsm::transferdonereq(std::string m, int &r) {
+    printf("statetransferdone req received from %s\n", m.c_str());
     int ret = rsm_client_protocol::OK;
     assert(pthread_mutex_lock(&rsm_mutex) == 0);
-    // For lab 8
+    if (!insync) {
+        printf("statetransferdone not insync\n");
+        ret = rsm_protocol::BUSY;
+    } else {
+        nbackup -= 1;
+        printf("statetransferdone primary insync\n");
+        if (nbackup == 0) {
+            printf("statetransferdone wakeup primary\n");
+            pthread_cond_signal(&sync_cond);
+        }
+    }
     assert(pthread_mutex_unlock(&rsm_mutex) == 0);
     return ret;
 }
