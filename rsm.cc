@@ -144,13 +144,16 @@ rsm::recovery() {
     bool r = false;
 
     assert(pthread_mutex_lock(&rsm_mutex) == 0);
-    inviewchange = false;
 
     while (true) {
         while (!cfg->ismember(cfg->myaddr())) {
+            printf("recovery: start join\n");
             if (join(primary)) {
                 printf("recovery: joined\n");
+                // set inviewchange to assure sync_with_primary
+                inviewchange = true;
             } else {
+                printf("recovery: join failed\n");
                 assert(pthread_mutex_unlock(&rsm_mutex) == 0);
                 sleep(5); // XXX make another node in cfg primary?
                 assert(pthread_mutex_lock(&rsm_mutex) == 0);
@@ -187,22 +190,17 @@ rsm::sync_with_backups() {
 
     // wait until everyone synced
 
-    std::vector<std::string> prev_view = cfg->get_prevview();
     std::vector<std::string> cur_view = cfg->get_curview();
-
-    backups.clear();
+    assert(nbackup == 0);
 
     for (const std::string &node : cfg->get_curview()) {
         if (node == cfg->myaddr()) {
             continue;
         }
-        if (std::find(prev_view.begin(), prev_view.end(), node) != prev_view.end()) {
-            printf("will wait for %s\n", node.c_str());
-            backups.insert(node);
-        }
+        printf("primary will wait for %s\n", node.c_str());
+        nbackup += 1;
     }
 
-    nbackup = backups.size();
     printf("wait for %d backups\n", nbackup);
     while (nbackup > 0) {
         pthread_cond_wait(&sync_cond, &rsm_mutex);
@@ -253,7 +251,11 @@ rsm::statetransfer(std::string m) {
                (long unsigned) h.get_rpcc(), ret);
         return false;
     }
+    printf("lastMyvs %u, %u\n", last_myvs.vid, last_myvs.seqno);
+    printf("r.last %u, %u\n", r.last.vid, r.last.seqno);
+    printf("stf: %d\n", stf != nullptr);
     if (stf && last_myvs != r.last) {
+        printf("rsm::statetransfer: call unmarshal_state\n");
         stf->unmarshal_state(r.state);
     }
     last_myvs = r.last;
@@ -402,7 +404,7 @@ rsm::client_invoke(int procno, std::string req, std::string &r) {
             if (state != rsm_protocol::OK) {
                 // instruct Paxos object to initiate a view change?
                 printf("invoke returned not OK\n");
-                return rsm_protocol::ERR;
+                return rsm_protocol::BUSY;
             }
         }
         r = execute(procno, req);

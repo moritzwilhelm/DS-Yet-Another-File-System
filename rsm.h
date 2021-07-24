@@ -9,7 +9,6 @@
 #include "rsm_state_transfer.h"
 #include "rpc.h"
 #include <arpa/inet.h>
-#include <set>
 #include "config.h"
 
 
@@ -30,7 +29,6 @@ protected:
     bool insync;
     bool inviewchange;
     unsigned nbackup;
-    std::set<std::string> backups;
 
     // For testing purposes
     rpcs *testsvr;
