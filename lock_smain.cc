@@ -18,7 +18,13 @@ int main(int argc, char *argv[]) {
 
     if (argc != 3) {
         fprintf(stderr, "Usage: %s [master:]port [me:]port\n", argv[0]);
-        exit(1);
+        if (argc == 2) {
+            fprintf(stderr, "Only master port provided. Continuing assuming me == master...\n");
+            argv[2] = argv[1];
+            argc = 3;
+        } else {
+            exit(1);
+        }
     }
 
     //jsl_set_debug(2);
