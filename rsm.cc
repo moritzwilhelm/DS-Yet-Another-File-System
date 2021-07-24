@@ -391,7 +391,7 @@ rsm::client_invoke(int procno, std::string req, std::string &r) {
             if (!client) {
                 // instruct Paxos object to initiate a view change?
                 printf("client bind fail %s\n", node.c_str());
-                return rsm_protocol::ERR;
+                return rsm_protocol::BUSY;
             }
 
             int dummy;
