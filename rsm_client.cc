@@ -29,9 +29,20 @@ rsm_client::rsm_client(std::string dst)
 
 // Assumes caller holds rsm_client_mutex 
 void
-rsm_client::primary_failure()
-{
-  // For lab 8
+rsm_client::primary_failure() {
+    delete primary.cl;
+
+    sockaddr_in dstsock;
+    make_sockaddr(known_mems.back().c_str(), &dstsock);
+    primary.id = known_mems.back();
+    primary.cl = new rpcc(dstsock);
+    int ret = primary.cl->bind(rpcc::to(1000));
+    if (ret < 0) {
+        printf("rsm_client::primary_failure bind failure %d failure w %s; exit\n", ret,
+               primary.id.c_str());
+    }
+    primary.nref = 0;
+    known_mems.pop_back();
 }
 
 rsm_protocol::status
