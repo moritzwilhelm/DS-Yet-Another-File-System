@@ -406,6 +406,8 @@ rsm::client_invoke(int procno, std::string req, std::string &r) {
                 printf("invoke returned not OK\n");
                 return rsm_protocol::BUSY;
             }
+
+            breakpoint1();
         }
         r = execute(procno, req);
     }
@@ -434,6 +436,7 @@ rsm::invoke(int proc, viewstamp vs, std::string req, int &dummy) {
         myvs.seqno += 1;
         assert(pthread_mutex_unlock(&rsm_mutex) == 0);
         printf("invoke success, next vs: %u %u\n", myvs.vid, myvs.seqno);
+        breakpoint1();
     } else {
         printf("Unexpected VS %u %u\n", vs.vid, vs.seqno);
         printf("Expected VS %u %u\n", myvs.vid, myvs.seqno);

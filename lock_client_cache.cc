@@ -102,10 +102,16 @@ void lock_client_cache::releaser() {
                 lu->dorelease(lid);
             }
             printf("releaser send to server\n");
-            assert(client->call(lock_protocol::release, this->id, lock.acquire_seq_num, lid, r) == lock_protocol::OK);
+            lock_protocol::status ret = client->call(lock_protocol::release, this->id, lock.acquire_seq_num, lid, r);
             printf("after releaser send to server\n");
             assert(lock.stat == Lock::RELEASING);
-            lock.stat = Lock::NONE;
+            if (ret == lock_protocol::OK) {
+                lock.stat = Lock::NONE;
+            } else {
+                printf("releaser send to server... some error %d\n", ret);
+                // reset to free to assure next revoke will try to release again
+                lock.stat = Lock::FREE;
+            }
             broadcast(lock.server_release_called);
             unlock(lock.mutex);
         }
@@ -148,7 +154,13 @@ lock_protocol::status lock_client_cache::acquire(lock_protocol::lockid_t lid) {
             } else if (ret == lock_protocol::RETRY) {
                 printf("call acquire server returned retry %llu %s\n", lid, this->id.c_str());
                 lock.stat = Lock::NONE;
-                wait(lock.retry_called, lock.mutex);
+
+                struct timeval now{};
+                struct timespec next_timeout{};
+                next_timeout.tv_sec = now.tv_sec + 3;
+                next_timeout.tv_nsec = 0;
+                pthread_cond_timedwait(&lock.retry_called, &lock.mutex, &next_timeout);
+
                 unlock(lock.mutex);
                 return acquire(lid);
             } else {
