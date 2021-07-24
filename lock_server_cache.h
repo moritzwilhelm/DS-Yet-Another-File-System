@@ -75,11 +75,11 @@ public:
 
 
     std::string marshal_state() override {
-        // lock any needed mutexes
         ScopedLock scopedLock(&this->server_lock);
 
         marshall rep;
-        rep << locks.size();
+        rep << (int) locks.size();
+
         std::unordered_map<lock_protocol::lockid_t, Lock>::iterator iter_lock;
         for (iter_lock = locks.begin(); iter_lock != locks.end(); iter_lock++) {
             lock_protocol::lockid_t lid = iter_lock->first;
@@ -89,18 +89,19 @@ public:
             rep << lock.waiters;
             rep << lock.revoked;
         }
-        // unlock any mutexes
+
         return rep.str();
     }
 
     void unmarshal_state(std::string state) override {
-        // lock any needed mutexes
         ScopedLock scopedLock(&this->server_lock);
 
+        locks.clear();
+
         unmarshall rep(state);
-        unsigned int locks_size;
+        int locks_size;
         rep >> locks_size;
-        for (unsigned int i = 0; i < locks_size; i++) {
+        for (int i = 0; i < locks_size; i++) {
             lock_protocol::lockid_t lid;
             rep >> lid;
             Lock lock{};
@@ -111,7 +112,6 @@ public:
             lock.revoked = (bool) (revoked);
             locks[lid] = lock;
         }
-        // unlock any mutexes
     }
 };
 
